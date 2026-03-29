@@ -1,0 +1,16 @@
+[project]
+name = "mcp-tutorial"
+version = "0.1.0"
+description = "MCP 新手教学 Demo：LLM 自动决策调用 FastMCP 工具"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastmcp>=3.1.1",
+    "openai>=2.30.0",
+    "pydantic>=2.12.5",
+    "python-dotenv>=1.2.2",
+]
+
+[[tool.uv.index]]
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
