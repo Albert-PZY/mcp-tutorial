@@ -1,24 +1,24 @@
 flowchart TD
 
-    A["[1] Start client<br/>uv run python main.py"]
-    B["[2] Load config<br/>AppConfig.from_env()"]
-    C{"[3] Select transport<br/>MCP_TRANSPORT"}
+    A["[1] 启动客户端<br/>uv run python main.py"]
+    B["[2] 读取配置<br/>AppConfig.from_env()"]
+    C{"[3] 选择协议<br/>MCP_TRANSPORT"}
     D["[3.1] stdio<br/>PythonStdioTransport(server/stdio.py)"]
-    E["[3.2] sse<br/>Connect http://host:port/sse"]
-    F["[3.3] streamable_http<br/>Connect http://host:port/mcp"]
-    G["[4] Open MCP session<br/>async with mcp_client"]
-    H["[5] User enters prompt"]
+    E["[3.2] sse<br/>连接 http://host:port/sse"]
+    F["[3.3] streamable_http<br/>连接 http://host:port/mcp"]
+    G["[4] 建立 MCP 会话<br/>async with mcp_client"]
+    H["[5] 用户输入问题"]
     I["[6] ask_with_llm(...)"]
-    J["[7] list_tools()<br/>discover 4 tools"]
-    K["[8] tools schema(4 tools) -> OpenAI tools"]
+    J["[7] list_tools()<br/>发现 4 个工具"]
+    K["[8] tools schema(4个工具) -> OpenAI tools"]
     L["[9] OpenAI chat.completions.create(...)"]
-    M{"[10] Has tool_calls?"}
-    N["[11] Print final answer"]
+    M{"[10] 有 tool_calls?"}
+    N["[11] 输出最终答案"]
     O["[12] call_tool(selected_name,args)"]
-    P["[13] FastMCP executes selected tool<br/>calculator_add / calculator_subtract / calculator_multiply / calculator_divide"]
-    Q["[14] Append tool result to messages"]
-    R{"[15] User typed exit?"}
-    S["[16] End program"]
+    P["[13] FastMCP 执行选中工具<br/>calculator_add / calculator_subtract / calculator_multiply / calculator_divide"]
+    Q["[14] 回填工具结果到 messages"]
+    R{"[15] 用户输入 exit?"}
+    S["[16] 结束程序"]
 
     A --> B --> C
     C --> D --> G
@@ -26,10 +26,10 @@ flowchart TD
     C --> F --> G
 
     G --> H --> I --> J --> K --> L --> M
-    M -- No --> N --> R
-    M -- Yes --> O --> P --> Q --> L
-    R -- No --> H
-    R -- Yes --> S
+    M -- 否 --> N --> R
+    M -- 是 --> O --> P --> Q --> L
+    R -- 否 --> H
+    R -- 是 --> S
 
     classDef start fill:#E3F2FD,stroke:#1E88E5,color:#0D47A1,stroke-width:2px;
     classDef config fill:#E8F5E9,stroke:#43A047,color:#1B5E20,stroke-width:2px;

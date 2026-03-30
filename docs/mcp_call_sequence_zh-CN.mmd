@@ -1,38 +1,38 @@
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","lineColor":"#334155","textColor":"#0f172a","actorBkg":"#f8fafc","actorBorder":"#94a3b8","actorTextColor":"#0f172a","signalColor":"#334155","signalTextColor":"#0f172a","labelBoxBkgColor":"#ffffff","labelBoxBorderColor":"#94a3b8","labelTextColor":"#0f172a","activationBkgColor":"#dbeafe","activationBorderColor":"#2563eb","sequenceNumberColor":"#0f172a","noteBkgColor":"#fff7ed","noteBorderColor":"#fdba74","noteTextColor":"#7c2d12"}}}%%
 sequenceDiagram
     autonumber
-    participant U as User
+    participant U as 用户
     participant Main as main.py
     participant C as MCP Client
     participant S as MCP Server
     participant L as LLM
 
     rect rgb(239, 246, 255)
-    Note over C,S: Phase 1: Connect and initialize
-    U->>Main: Input "Please calculate 1+2"
-    Main->>C: Open MCP session (async with client)
+    Note over C,S: 阶段1：建立连接与握手
+    U->>Main: 输入“帮我计算 1+2 等于几”
+    Main->>C: 建立连接（async with client）
     C->>S: initialize
     C->>S: notifications/initialized
     end
 
     rect rgb(236, 253, 245)
-    Note over C,S: Phase 2: Tool discovery
+    Note over C,S: 阶段2：工具发现
     C->>S: tools/list
-    S-->>C: Return 4 tools: calculator_add/subtract/multiply/divide (with title/description/schema)
+    S-->>C: 返回 4 个工具: calculator_add/subtract/multiply/divide（含 title/description/schema）
     end
 
     rect rgb(254, 249, 195)
-    Note over C,L: Phase 3: LLM selects one tool
-    C->>L: User prompt + tools(schema)
+    Note over C,L: 阶段3：LLM 从 4 个工具中选 1 个调用
+    C->>L: 用户问题 + tools(schema)
     L-->>C: tool_call(name=calculator_add,args={a:1,b:2})
     C->>S: tools/call(calculator_add,{a:1,b:2})
     S-->>C: CallToolResult(content=3)
     end
 
     rect rgb(255, 237, 213)
-    Note over C,L: Phase 4: Feed back tool result and generate final answer
-    C->>L: Append tool result
-    L-->>C: Final natural-language answer
-    C-->>Main: Return answer text
-    Main-->>U: Output "1 + 2 = 3"
+    Note over C,L: 阶段4：回填结果并生成答案
+    C->>L: 回填 tool 结果
+    L-->>C: 最终自然语言答案
+    C-->>Main: 返回答案文本
+    Main-->>U: 输出“1 + 2 = 3”
     end

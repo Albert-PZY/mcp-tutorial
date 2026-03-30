@@ -1,131 +1,116 @@
-# MCP 工具调用完整过程
+# MCP Complete Call Flow
 
-这篇文档专门解释一个问题：  
-在这个 demo 里，一个 MCP 工具（`calculator_add`）到底是怎么从“被发现”到“被调用”，最后把结果返回给用户的。
+This document explains one practical question:
 
-## 1. 先看参与角色
+How does a tool in this demo move from discovery to execution and finally to user-facing output?
 
-一次完整调用里有 4 个角色：
+## 1. Roles
 
-1. 用户：在终端输入问题（例如“帮我算 1+2”）。
-2. 客户端程序：`main.py + client/*`，负责连 MCP、调 LLM、转发工具调用。
-3. MCP 服务端：`server/*`，真正提供工具（`@mcp.tool(name=\"calculator_add\", ...)`）。
-4. LLM：负责判断“要不要用工具、用哪个工具、传什么参数”。
+There are 4 roles in one full request:
 
-## 2. 关键代码位置
+1. User: types a question in terminal.
+2. Client app: `main.py + client/*`, handles MCP session, LLM loop, and tool dispatch.
+3. MCP server: `server/*`, exposes actual tools.
+4. LLM: decides whether to call a tool, which tool to call, and with what arguments.
 
-1. `server/app.py`：用 `@mcp.tool()` 注册 `calculator_add/calculator_subtract/calculator_multiply/calculator_divide`。
-2. `server/runtime.py`：按协议启动 FastMCP 服务（`stdio/sse/streamable-http`）。
-3. `client/runtime.py`：按配置创建 MCP Client。
-4. `client/llm.py`：工具发现、LLM 决策、调用工具、回填结果。
-5. `main.py`：聊天循环入口，接收用户输入并输出最终答案。
+## 2. Key code locations
 
-## 3. 全流程总览（先看大图）
+1. `server/app.py`: registers MCP tools (`calculator_add`, `calculator_subtract`, `calculator_multiply`, `calculator_divide`).
+2. `server/runtime.py`: starts FastMCP with selected transport.
+3. `client/runtime.py`: creates MCP client by transport.
+4. `client/llm.py`: tool discovery + tool-calling loop with LLM.
+5. `main.py`: interactive entry point.
 
-<img src="./mcp_call_sequence.png" alt="MCP 工具调用时序图" width="780" />
+## 3. Sequence overview
 
-## 4. 逐步拆开：每一步到底做了什么
+- Mermaid source: [mcp_call_sequence.mmd](./mcp_call_sequence.mmd)
 
-### 步骤 A：服务端先把工具“挂出来”
+<img src="./mcp_call_sequence.png" alt="MCP call sequence" width="780" />
 
-服务端代码（`server/app.py`）里：
+## 4. Step-by-step
 
-- `mcp = FastMCP("Test Server")`
-- `@mcp.tool()` 修饰 `add(a: int, b: int) -> int`，并映射为工具名 `calculator_add`
+### Step A: Register tools on server
 
-这一步的含义是：  
-MCP Server 拥有可被远程调用的多个工具，其中示例工具名是 `calculator_add`，输入 schema 为整数 `a`、`b`。
+In `server/app.py`, tools are registered via `@mcp.tool(...)`.
 
-### 步骤 B：客户端建立 MCP 会话并握手
+Example:
 
-在 `main.py` 里进入 `async with mcp_client as client` 时，会触发连接和初始化：
+- `name="calculator_add"`
+- `title="Calculator Add"`
+- `description="Add two numbers"`
 
-1. 客户端连上服务端（具体传输由 `MCP_TRANSPORT` 决定）。
-2. 发送 JSON-RPC 请求：`initialize`
-3. 收到服务端能力信息后，发送通知：`notifications/initialized`
+### Step B: Open MCP session and initialize
 
-这一步做完，双方才算“协议层已就绪”。
+When `main.py` enters `async with mcp_client as client`, client performs handshake:
 
-### 步骤 C：先做工具发现（Discovery）
+1. `initialize` request
+2. `notifications/initialized` notification
 
-`client/llm.py` 的第一步是：
+After this, the protocol session is ready.
+
+### Step C: Discover tools
+
+`client/llm.py` calls:
 
 - `await mcp_client.list_tools()`
 
-对应协议操作是：
+Protocol operation:
 
-- JSON-RPC：`tools/list`
+- `tools/list`
 
-拿到的内容里至少会有：
+The response includes at least:
 
-1. 工具名：`calculator_add`（以及其它 `calculator_*` 工具）
-2. 输入参数 schema（`a`、`b` 的类型）
-3. 可能还会有 `outputSchema`、`_meta` 等字段（取决于实现与版本）
+1. tool `name`
+2. tool `title` (if set)
+3. tool `description` (if set)
+4. `inputSchema` and often `outputSchema`
 
-### 步骤 D：把工具信息交给 LLM 做决策
+### Step D: Ask LLM to decide
 
-`ask_with_llm()` 里会把 MCP tools 转成模型可识别的 `tools` 参数，发给 LLM：
+Client sends:
 
-1. 用户问题（例如“1+2”）
-2. 可用工具列表（包含 `calculator_add` 的 schema）
+1. user message
+2. available tool schemas
 
-然后 LLM 输出二选一结果：
+LLM then either:
 
-1. 直接回答（不调工具）
-2. 产出 `tool_calls`（本例就是调用 `calculator_add`）
+1. answers directly
+2. returns `tool_calls`
 
-### 步骤 E：客户端执行工具调用
+### Step E: Execute selected tool via MCP
 
-如果 LLM 返回 `tool_calls`，客户端会遍历调用：
+If LLM returns `tool_calls`, client executes:
 
 - `await mcp_client.call_tool(call.function.name, arguments)`
 
-对应协议操作是：
+Protocol operation:
 
-- JSON-RPC：`tools/call`
+- `tools/call`
 
-请求里包含：
+### Step F: Feed tool result back to LLM
 
-1. 工具名：`calculator_add`
-2. 参数：`{"a": 1, "b": 2}`
+Client appends a `tool` message to conversation and requests one more completion.
 
-服务端收到后，执行 `calculator_add` 并返回 `CallToolResult`。
+### Step G: Print final answer
 
-### 步骤 F：把工具结果回填给 LLM
+`main.py` prints the final natural-language result.
 
-客户端拿到 `CallToolResult` 后，会把结果包装成一条 `tool` 角色消息追加到 `messages`：
+## 5. MCP operations observed in order
 
-1. `tool_call_id`（对应这次调用）
-2. `name`（工具名）
-3. `content`（工具输出，比如 `3`）
+1. `initialize`
+2. `notifications/initialized`
+3. `tools/list`
+4. `tools/call`
 
-然后再次调用 LLM，让它基于“工具执行结果”产出最终自然语言回答。
+## 6. Real captured payloads (stdio transport)
 
-### 步骤 G：输出给用户
+Captured from real local run (not hand-written examples).
 
-`main.py` 拿到最终文本后直接打印：
+- Date: 2026-03-29
+- FastMCP: `3.1.1`
+- Server: `Test Server`
 
-- `助手：1 + 2 = 3`
-
-到这里一次完整链路结束。
-
-## 5. 协议层会看到哪些 MCP 操作
-
-按发生顺序，核心就是这 4 类：
-
-1. `initialize`：会话初始化握手。
-2. `notifications/initialized`：告诉服务端“初始化完成，可以正式收发业务请求”。
-3. `tools/list`：查询当前可用工具（工具发现）。
-4. `tools/call`：按工具名+参数执行具体工具。
-
-可以把它记成一句话：  
-**先握手，再发现，再调用，再把结果回填给模型。**
-
-## 6. 真实运行抓取报文（本项目，`stdio`）
-
-下面是本地真实跑一次 `list_tools + call_tool(calculator_add)` 抓到的 MCP 报文（按发生顺序）。  
-
-### 6.1 initialize（请求 + 响应）
+### 6.1 initialize (request + response)
 
 ```json
 {
@@ -173,7 +158,7 @@ MCP Server 拥有可被远程调用的多个工具，其中示例工具名是 `c
 }
 ```
 
-### 6.2 notifications/initialized（通知）
+### 6.2 notifications/initialized
 
 ```json
 {
@@ -182,7 +167,7 @@ MCP Server 拥有可被远程调用的多个工具，其中示例工具名是 `c
 }
 ```
 
-### 6.3 tools/list（请求 + 响应）
+### 6.3 tools/list (request + response)
 
 ```json
 {
@@ -355,7 +340,7 @@ MCP Server 拥有可被远程调用的多个工具，其中示例工具名是 `c
 }
 ```
 
-### 6.4 tools/call（请求 + 响应）
+### 6.4 tools/call (request + response)
 
 ```json
 {
@@ -391,34 +376,22 @@ MCP Server 拥有可被远程调用的多个工具，其中示例工具名是 `c
 }
 ```
 
-## 7. 三种传输协议下，这个流程有什么变化？
+## 7. What changes across transports?
 
-答案：**主流程不变，只是“连接方式”不同。**
+The core MCP flow does not change.  
+Only connection method changes:
 
 1. `stdio`
-客户端通过标准输入输出启动并连接服务端进程。最适合本地教学。
-
 2. `sse`
-客户端通过 HTTP + SSE 连已经运行的服务端。
-
 3. `streamable_http`
-客户端通过 HTTP 连服务端的 streamable 路径。
 
-无论哪种 transport，步骤仍是：
+## 8. Common misunderstandings
 
-1. initialize
-2. tools/list
-3. tools/call
-4. 回填结果给 LLM
-5. 输出最终答案
+1. MCP does not automatically decide tool selection.  
+The LLM usually decides; MCP standardizes communication and execution.
 
-## 8. 常见误区
+2. `@mcp.tool` registration alone does not guarantee invocation.  
+Tools must be discovered (`tools/list`) and selected by LLM (`tool_calls`).
 
-1. 误区：MCP 会自动替你“决定调用哪个工具”。
-实际：决定通常是 LLM 做的；MCP 负责标准化通信和执行。
-
-2. 误区：有 `@mcp.tool` 就会自动被调用。
-实际：还要客户端先 `tools/list` 发现它，再由 LLM 产生 `tool_call`。
-
-3. 误区：换协议会改业务逻辑。
-实际：一般不用改工具逻辑，只改连接/启动方式。
+3. Changing transport usually does not require business logic rewrite.  
+Most changes are in startup and connection settings.
