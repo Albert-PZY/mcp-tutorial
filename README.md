@@ -1,6 +1,6 @@
 # MCP Minimal Interactive Demo
 
-EN | [zh-CN](./README_zh-CN.md)
+[English](./README.md) | [中文](./README_zh-CN.md)
 
 Start the program and chat directly in terminal.
 

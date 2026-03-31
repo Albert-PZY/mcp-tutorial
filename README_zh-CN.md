@@ -1,6 +1,6 @@
 # MCP 最小交互 Demo
 
-[EN](./README.md) | zh-CN
+[English](./README.md) | [中文](./README_zh-CN.md)
 
 只需要启动程序，然后直接输入问题。
 

@@ -1,114 +1,129 @@
-# MCP Complete Call Flow
+# MCP Tool Call Complete Process
 
-This document explains one practical question:
+This document focuses on one specific question:
+In this demo, how does an MCP tool (`calculator_add`) move from "being discovered" to "being called", and finally return the result to the user?
 
-How does a tool in this demo move from discovery to execution and finally to user-facing output?
+## 1. First, the roles involved
 
-## 1. Roles
+There are 4 roles in one complete call:
 
-There are 4 roles in one full request:
-
-1. User: types a question in terminal.
-2. Client app: `main.py + client/*`, handles MCP session, LLM loop, and tool dispatch.
-3. MCP server: `server/*`, exposes actual tools.
-4. LLM: decides whether to call a tool, which tool to call, and with what arguments.
+1. User: enters a question in terminal (for example, "help me calculate 1+2").
+2. Client program: `main.py + client/*`, responsible for MCP connection, LLM interaction, and forwarding tool calls.
+3. MCP server: `server/*`, actually provides tools (for example, `@mcp.tool(name="calculator_add", ...)`).
+4. LLM: decides whether a tool is needed, which tool to use, and what arguments to pass.
 
 ## 2. Key code locations
 
-1. `server/app.py`: registers MCP tools (`calculator_add`, `calculator_subtract`, `calculator_multiply`, `calculator_divide`).
-2. `server/runtime.py`: starts FastMCP with selected transport.
-3. `client/runtime.py`: creates MCP client by transport.
-4. `client/llm.py`: tool discovery + tool-calling loop with LLM.
-5. `main.py`: interactive entry point.
+1. `server/app.py`: registers `calculator_add/calculator_subtract/calculator_multiply/calculator_divide` with `@mcp.tool()`.
+2. `server/runtime.py`: starts FastMCP server by protocol (`stdio/sse/streamable-http`).
+3. `client/runtime.py`: creates MCP Client based on configuration.
+4. `client/llm.py`: handles tool discovery, LLM decision, tool execution, and result injection.
+5. `main.py`: chat loop entry, receives user input and prints final answer.
 
-## 3. Sequence overview
+## 3. Full flow overview (big picture first)
 
-- Mermaid source: [mcp_call_sequence.mmd](./mcp_call_sequence.mmd)
+<img src="./mcp_call_sequence.png" alt="MCP tool call sequence" width="780" />
 
-<img src="./mcp_call_sequence.png" alt="MCP call sequence" width="780" />
+## 4. Step-by-step: what exactly happens at each step
 
-## 4. Step-by-step
+### Step A: Server exposes tools first
 
-### Step A: Register tools on server
+In server code (`server/app.py`):
 
-In `server/app.py`, tools are registered via `@mcp.tool(...)`.
+- `mcp = FastMCP("Test Server")`
+- `@mcp.tool()` decorates `add(a: int, b: int) -> int` and maps it to tool name `calculator_add`
 
-Example:
+What this means:
+The MCP Server exposes multiple remotely callable tools. In this example, one tool is `calculator_add`, and its input schema requires integer `a` and `b`.
 
-- `name="calculator_add"`
-- `title="Calculator Add"`
-- `description="Add two numbers"`
+### Step B: Client establishes MCP session and performs handshake
 
-### Step B: Open MCP session and initialize
+When `main.py` enters `async with mcp_client as client`, connection and initialization are triggered:
 
-When `main.py` enters `async with mcp_client as client`, client performs handshake:
+1. Client connects to server (transport depends on `MCP_TRANSPORT`).
+2. Sends JSON-RPC request: `initialize`
+3. After receiving server capability info, sends notification: `notifications/initialized`
 
-1. `initialize` request
-2. `notifications/initialized` notification
+After this step, both sides are considered "protocol-ready".
 
-After this, the protocol session is ready.
+### Step C: Tool discovery first
 
-### Step C: Discover tools
-
-`client/llm.py` calls:
+The first action in `client/llm.py` is:
 
 - `await mcp_client.list_tools()`
 
 Protocol operation:
 
-- `tools/list`
+- JSON-RPC: `tools/list`
 
 The response includes at least:
 
-1. tool `name`
-2. tool `title` (if set)
-3. tool `description` (if set)
-4. `inputSchema` and often `outputSchema`
+1. Tool name: `calculator_add` (and other `calculator_*` tools)
+2. Input schema (`a` and `b` types)
+3. Possibly `outputSchema`, `_meta`, etc. (depends on implementation/version)
 
-### Step D: Ask LLM to decide
+### Step D: Pass tool information to the LLM for decision-making
 
-Client sends:
+Inside `ask_with_llm()`, MCP tools are converted into the model-recognizable `tools` parameter and sent to the LLM together with:
 
-1. user message
-2. available tool schemas
+1. User question (for example, "1+2")
+2. Available tool list (including `calculator_add` schema)
 
-LLM then either:
+Then the LLM returns one of two outcomes:
 
-1. answers directly
-2. returns `tool_calls`
+1. Direct answer (no tool call)
+2. `tool_calls` (in this case, call `calculator_add`)
 
-### Step E: Execute selected tool via MCP
+### Step E: Client executes tool calls
 
-If LLM returns `tool_calls`, client executes:
+If LLM returns `tool_calls`, the client iterates and runs:
 
 - `await mcp_client.call_tool(call.function.name, arguments)`
 
 Protocol operation:
 
-- `tools/call`
+- JSON-RPC: `tools/call`
+
+The request contains:
+
+1. Tool name: `calculator_add`
+2. Arguments: `{"a": 1, "b": 2}`
+
+After receiving it, server executes `calculator_add` and returns `CallToolResult`.
 
 ### Step F: Feed tool result back to LLM
 
-Client appends a `tool` message to conversation and requests one more completion.
+After client receives `CallToolResult`, it wraps it into a `tool` role message and appends to `messages`:
 
-### Step G: Print final answer
+1. `tool_call_id` (for this call)
+2. `name` (tool name)
+3. `content` (tool output, such as `3`)
 
-`main.py` prints the final natural-language result.
+Then it calls LLM again so the model can generate the final natural-language response based on tool execution result.
 
-## 5. MCP operations observed in order
+### Step G: Return to user
 
-1. `initialize`
-2. `notifications/initialized`
-3. `tools/list`
-4. `tools/call`
+`main.py` prints the final text directly:
 
-## 6. Real captured payloads (stdio transport)
+- `Assistant: 1 + 2 = 3`
 
-Captured from real local run (not hand-written examples).
+At this point, one complete end-to-end flow is done.
 
-- Date: 2026-03-29
-- FastMCP: `3.1.1`
-- Server: `Test Server`
+## 5. Which MCP operations appear at protocol level
+
+In order, the core operations are exactly these 4:
+
+1. `initialize`: session initialization handshake.
+2. `notifications/initialized`: tells server "initialization is done, formal requests can start".
+3. `tools/list`: query currently available tools (tool discovery).
+4. `tools/call`: execute a specific tool by name and arguments.
+
+You can remember it as one sentence:
+**Handshake first, then discovery, then invocation, then feed result back to the model.**
+
+## 6. Real captured payloads (`stdio`)
+
+Below are real MCP payloads captured from one local run of `list_tools + call_tool(calculator_add)` (in chronological order).
 
 ### 6.1 initialize (request + response)
 
@@ -158,7 +173,7 @@ Captured from real local run (not hand-written examples).
 }
 ```
 
-### 6.2 notifications/initialized
+### 6.2 notifications/initialized (notification)
 
 ```json
 {
@@ -376,22 +391,34 @@ Captured from real local run (not hand-written examples).
 }
 ```
 
-## 7. What changes across transports?
+## 7. What changes under three transports?
 
-The core MCP flow does not change.  
-Only connection method changes:
+Answer: **The main flow stays the same. Only connection mode changes.**
 
 1. `stdio`
+Client starts and connects server process through standard input/output.
+
 2. `sse`
+Client connects to an already-running server via HTTP + SSE.
+
 3. `streamable_http`
+Client connects to server's streamable endpoint via HTTP.
+
+No matter which transport you use, the steps remain:
+
+1. initialize
+2. tools/list
+3. tools/call
+4. feed result back to LLM
+5. output final answer
 
 ## 8. Common misunderstandings
 
-1. MCP does not automatically decide tool selection.  
-The LLM usually decides; MCP standardizes communication and execution.
+1. Misunderstanding: MCP automatically decides which tool to call.  
+Reality: the decision is usually made by LLM; MCP standardizes communication and execution.
 
-2. `@mcp.tool` registration alone does not guarantee invocation.  
-Tools must be discovered (`tools/list`) and selected by LLM (`tool_calls`).
+2. Misunderstanding: once `@mcp.tool` exists, it will be called automatically.  
+Reality: client must discover it via `tools/list`, then LLM must generate `tool_call`.
 
-3. Changing transport usually does not require business logic rewrite.  
-Most changes are in startup and connection settings.
+3. Misunderstanding: changing transport requires changing business logic.  
+Reality: usually tool logic stays unchanged; only connection/startup mode changes.
