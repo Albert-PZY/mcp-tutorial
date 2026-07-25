@@ -47,12 +47,17 @@ test.describe('MCP tutorial site', () => {
   });
 
   test('code blocks are syntax-highlighted by highlight.js', async ({ page }) => {
+    test.setTimeout(45_000);
     await page.goto('/index.html');
-    // Give the highlight.js CDN enough time to load.
-    const hasHljs = await page
-      .waitForFunction(() => (window as any).hljs != null, { timeout: 15_000 })
-      .then(() => true)
-      .catch(() => false);
+    // Give the highlight.js CDN enough time to load. (arg must be undefined,
+    // options go in the 3rd arg slot of page.waitForFunction.)
+    let hasHljs = false;
+    try {
+      await page.waitForFunction(() => (window as any).hljs != null, undefined, { timeout: 12_000 });
+      hasHljs = true;
+    } catch {
+      hasHljs = false;
+    }
     test.skip(!hasHljs, 'highlight.js CDN unreachable in this runner; skipping');
     // At least one highlighted block should exist after page load.
     const hl = page.locator('pre code.hljs');

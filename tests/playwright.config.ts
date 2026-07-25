@@ -11,7 +11,7 @@ export default defineConfig({
   testDir: './playwright',
   timeout: 60_000,
   expect: { timeout: 10_000 },
-  retries: 2,
+  retries: 1,
   reporter: [['list'], ['html', { open: 'never', outputFolder: 'playwright-report' }]],
   use: {
     baseURL: BASE,
