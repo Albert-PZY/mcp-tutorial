@@ -5,12 +5,46 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>MCP 教学站点 · mcp-tutorial</title>
 <meta name="description" content="MCP (Model Context Protocol) 零基础可视化讲解：架构、源码逻辑、完整调用流程、应用场景与三种传输对比。" />
+
+<!-- Inline theme bootstrap: read saved theme before first paint to avoid FOUC. -->
+<script>
+(function () {
+  try {
+    var saved = localStorage.getItem("mcp-theme");
+    if (saved === "dark" || saved === "light") {
+      document.documentElement.setAttribute("data-theme", saved);
+    } else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+      document.documentElement.setAttribute("data-theme", "dark");
+    } else {
+      document.documentElement.setAttribute("data-theme", "light");
+    }
+  } catch (e) {
+    document.documentElement.setAttribute("data-theme", "light");
+  }
+})();
+</script>
+
 <link rel="stylesheet" href="assets/style.css" />
-<!-- highlight.js (GitHub-light, only python + json + bash kept small) -->
-<link rel="stylesheet"
-  href="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/styles/github.min.css" />
+<!-- highlight.js theme CSS: github-dark is the base; our style.css overrides per-theme tokens. -->
+<link id="hljs-theme" rel="stylesheet"
+  href="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/styles/github-dark.min.css" />
+
+<!-- highlight.js core: try jsdelivr first, fall back to unpkg via JS loader below. -->
 <script defer src="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/lib/highlight.min.js"></script>
 <script defer src="assets/plantuml.js"></script>
+<script>
+// CDN fallback: if jsdelivr didn't load hljs within 4s, try unpkg.
+(function () {
+  var tried = false;
+  function loadUnpkg() {
+    if (tried) return; tried = true;
+    var s = document.createElement("script");
+    s.src = "https://unpkg.com/highlight.js@11.10.0/lib/highlight.min.js";
+    document.head.appendChild(s);
+  }
+  setTimeout(function () { if (!window.hljs) loadUnpkg(); }, 4000);
+})();
+</script>
 </head>
 <body>
 <div class="layout">
@@ -34,6 +68,9 @@
       <a href="#transports">5. 三种传输对比</a>
       <a href="#run" class="sub">怎么在本机跑</a>
     </nav>
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题" title="切换浅色 / 暗色主题">
+      <span id="theme-icon">🌗</span><span id="theme-label">主题</span>
+    </button>
   </aside>
 
   <!-- Main content -->
@@ -75,8 +112,8 @@
       <h2>1.1 三层架构</h2>
       <p>本项目把这套心智模型落地成代码层：<strong>决策层（LLM）</strong> / <strong>编排层（MCP Client）</strong> / <strong>执行层（MCP Server）</strong>。</p>
 
-      <figure class="figure-wrap" data-figure="architecture">
-        <pre class="plantuml" data-source="diagrams/architecture.puml"></pre>
+      <figure class="figure-wrap" data-figure="architecture" data-source="diagrams/architecture.puml">
+        <pre class="plantuml"></pre>
       </figure>
     </section>
 
@@ -218,8 +255,8 @@ def _tool_result_message(call, result) -> dict:
       <h2>2.4 主流程活动图</h2>
       <p>把“客户端”一整条主线画成活动图，包含三传输分支与 LLM↔MCP 循环。</p>
 
-      <figure class="figure-wrap" data-figure="process_flow">
-        <pre class="plantuml" data-source="diagrams/process_flow.puml"></pre>
+      <figure class="figure-wrap" data-figure="process_flow" data-source="diagrams/process_flow.puml">
+        <pre class="plantuml"></pre>
       </figure>
     </section>
 
@@ -230,8 +267,8 @@ def _tool_result_message(call, result) -> dict:
       <p>以“<strong>帮我算 1+2</strong>”这一句话为线索，把整条调用走一遍。本次涉及 4 个角色：用户 / 客户端 / 服务端 / LLM。</p>
 
       <h2 id="flow-sequence">3.1 时序图</h2>
-      <figure class="figure-wrap" data-figure="call_sequence">
-        <pre class="plantuml" data-source="diagrams/call_sequence.puml"></pre>
+      <figure class="figure-wrap" data-figure="call_sequence" data-source="diagrams/call_sequence.puml">
+        <pre class="plantuml"></pre>
       </figure>
       <p>分五个阶段：握手 → 发现 → 决策 → 执行 → 回填输出。下面是每段对应的真实 JSON-RPC 报文。</p>
 
@@ -336,8 +373,8 @@ def _tool_result_message(call, result) -> dict:
       </ul>
       <p>本 demo 的实际配合：<strong>LLM 用 Function Calling 做决策 → 客户端按 MCP 执行工具 → 回填结果</strong>。</p>
 
-      <figure class="figure-wrap" data-figure="mcp_vs_function_calling">
-        <pre class="plantuml" data-source="diagrams/mcp_vs_function_calling.puml"></pre>
+      <figure class="figure-wrap" data-figure="mcp_vs_function_calling" data-source="diagrams/mcp_vs_function_calling.puml">
+        <pre class="plantuml"></pre>
       </figure>
     </section>
 
@@ -357,8 +394,8 @@ def _tool_result_message(call, result) -> dict:
         </tbody>
       </table>
 
-      <figure class="figure-wrap" data-figure="transport_comparison">
-        <pre class="plantuml" data-source="diagrams/transport_comparison.puml"></pre>
+      <figure class="figure-wrap" data-figure="transport_comparison" data-source="diagrams/transport_comparison.puml">
+        <pre class="plantuml"></pre>
       </figure>
 
       <p><strong>选型建议</strong>：</p>
@@ -398,12 +435,49 @@ uv run python main.py</code></pre>
 </div>
 
 <script>
-window.addEventListener("DOMContentLoaded", () => {
-  // 1. Code highlight
-  if (window.hljs) {
-    document.querySelectorAll("pre code").forEach((b) => hljs.highlightElement(b));
+/* ---- Theme toggle ---- */
+function applyThemeVisual(theme) {
+  var icon = document.getElementById("theme-icon");
+  var label = document.getElementById("theme-label");
+  if (theme === "dark") {
+    if (icon) icon.textContent = "☀️";
+    if (label) label.textContent = "浅色";
+  } else {
+    if (icon) icon.textContent = "🌙";
+    if (label) label.textContent = "暗色";
   }
-  // 2. PlantUML render
+}
+
+document.addEventListener("DOMContentLoaded", function () {
+  var cur = document.documentElement.getAttribute("data-theme") || "light";
+  applyThemeVisual(cur);
+  var btn = document.getElementById("theme-toggle");
+  if (btn) {
+    btn.addEventListener("click", function () {
+      var now = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", now);
+      try { localStorage.setItem("mcp-theme", now); } catch (e) {}
+      applyThemeVisual(now);
+    });
+  }
+
+  /* ---- Code highlight: wait for hljs (defer + CDN fallback path) ---- */
+  var waited = 0;
+  function tryHighlight() {
+    if (window.hljs) {
+      document.querySelectorAll("pre code").forEach(function (b) {
+        try { window.hljs.highlightElement(b); } catch (e) {}
+      });
+      return true;
+    }
+    if (waited >= 8000) return true; // give up silently; page still readable
+    waited += 200;
+    setTimeout(tryHighlight, 200);
+    return false;
+  }
+  tryHighlight();
+
+  /* ---- PlantUML render ---- */
   if (window.McpSite && window.McpSite.renderPlantUml) {
     window.McpSite.renderPlantUml();
   }

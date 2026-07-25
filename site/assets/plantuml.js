@@ -1,23 +1,26 @@
-/* plantuml.js — in-browser PlantUML rendering via the official public server
+/* plantuml.js — in-browser PlantUML rendering for mcp-tutorial site
  *
- * Strategy:
- *   1. Read the diagram source from a `<pre class="plantuml">` (inline) OR fetch it
- *      from `src/data-source` if set (preferred, keeps the .puml as single source).
- *   2. Encode the source with PlantUML's deflate+base64 algorithm
- *      (`https://www.plantuml.com/plantuml/svg/<encoded>`), using the browser's
- *      built-in `CompressionStream("deflate-raw")` — zero npm deps.
- *   3. Fetch the SVG and inline it into the host element; if fetch fails
- *      (offline / network blocked), fall back to showing the raw source so
- *      the page never goes blank.
+ * DOM contract:
+ *   <figure class="figure-wrap" data-source="diagrams/xxx.puml">
+ *     <pre class="plantuml"></pre>      <!-- source container, hidden by CSS -->
+ *   </figure>
  *
- * Transparency note: this requires outbound network to plantuml.com at view
- * time. See site/README.md.
+ * The outer <figure> is the HOST where the result is shown.
+ * The inner <pre class="plantuml"> is only a source container; CSS hides it.
+ *
+ * Flow per figure:
+ *   1. Read source: fetch the file at data-source; fall back to pre.textContent on fetch fail.
+ *   2. Encode source with PlantUML's deflate-raw + custom base64 alphabet (zero deps;
+ *      uses browser-native CompressionStream).
+ *   3. Fetch SVG from https://www.plantuml.com/plantuml/svg/<encoded>
+ *      -> success: inline <svg> into <figure>, enable "click to zoom".
+ *      -> failure (offline / plantuml.com blocked): render a visible source listing
+ *         inside the <figure> so the page never goes blank.
+ *
+ * Needs outbound network to plantuml.com at view time. See site/README.md.
  */
 
-const PLANTUML_BASE =
-  "https://www.plantuml.com/plantuml/svg/";
-
-// PlantUML's own base64 alphabet (different from the standard one).
+const PLANTUML_BASE = "https://www.plantuml.com/plantuml/svg/";
 const PLANTUML_ALPHABET =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
@@ -36,72 +39,76 @@ function encode64(data) {
 }
 
 async function encodePlantUml(source) {
-  // PlantUML expects a "0x00 0x01 / deflate-raw" stream.
-  // Browsers ship `CompressionStream("deflate-raw")`; we transform a stream.
-  const enc = new TextEncoder();
-  const stream = new Blob([enc.encode(source)]).stream().pipeThrough(
+  // PlantUML expects a raw-deflate stream (no zlib header / adler32).
+  const stream = new Blob([new TextEncoder().encode(source)]).stream().pipeThrough(
     new CompressionStream("deflate-raw"),
   );
   const buf = new Uint8Array(await new Response(stream).arrayBuffer());
   return encode64(buf);
 }
 
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+
 async function fetchText(url) {
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) throw new Error("HTTP " + res.status);
   return await res.text();
 }
 
-function attachZoom(host, svgText) {
-  // Build a clickable wrapper so users can pan/zoom the diagram ("无损放大").
-  host.classList.add("figure-ready");
-  host.innerHTML = svgText;
-  const svg = host.querySelector("svg");
+function caption(figure) {
+  const src = figure.dataset.source || "";
+  if (!src) return "";
+  return '<figcaption>源: <code>' + escapeHtml(src) + '</code> · 点击图放大</figcaption>';
+}
+
+function attachSuccess(figure, svgText) {
+  figure.classList.add("figure-ready");
+  figure.classList.remove("figure-error");
+  figure.innerHTML = svgText + caption(figure);
+  const svg = figure.querySelector("svg");
   if (svg) {
     svg.removeAttribute("width");
     svg.removeAttribute("height");
     svg.style.maxWidth = "100%";
     svg.style.height = "auto";
   }
-  // Zoom indicator
-  if (!host.dataset.zoomBound) {
-    host.addEventListener("click", () => openZoom(host));
-    host.dataset.zoomBound = "1";
+  bindZoom(figure);
+}
+
+function showOfflineSource(figure, source, msg) {
+  figure.classList.remove("figure-ready");
+  figure.classList.add("figure-error");
+  figure.innerHTML =
+    '<details class="figure-source"><summary>⚠️ 图表未能在线渲染（plantuml.com 不可达，点击展开原始 PlantUML 源码）</summary>' +
+    '<pre class="figure-source-pre"><code class="language-plantuml">' + escapeHtml(source) + '</code></pre></details>' +
+    '<p class="figure-error-hint">原因: ' + escapeHtml(msg || "无外网或 plantuml.com 不可达") +
+    " · 源文件: <code>" + escapeHtml(figure.dataset.source || "") + "</code></p>" +
+    caption(figure);
+  if (window.hljs) {
+    const c = figure.querySelector("details pre code");
+    if (c) {
+      try { window.hljs.highlightElement(c); } catch (e) { /* ignore */ }
+    }
   }
 }
 
-function showError(host, source, msg) {
-  host.classList.add("figure-error");
-  const path = host.dataset.source || "";
-  const hint =
-    `图表源文件: <code>${escapeHtml(path)}</code><br>` +
-    `原因: ${escapeHtml(msg || "无外网或 plantuml.com 不可达")}<br>` +
-    "可手动把源文件用本地 PlantUML 渲染，或在外网环境打开本页。";
-  host.innerHTML =
-    `<details><summary>⚠️ 图表未能在线渲染（点击查看原始 PlantUML 源码）</summary>` +
-    `<pre><code class="language-plantuml">${escapeHtml(source)}</code></pre></details>` +
-    `<p class="figure-error-hint">${hint}</p>`;
-  if (host.dataset.source) {
-    // Pull the actual .puml content into the <pre> so the details block shows real source.
-    fetch(host.dataset.source)
-      .then((r) => r.ok ? r.text() : Promise.reject(r.status))
-      .then((text) => {
-        const code = host.querySelector("details pre code");
-        if (code) code.textContent = text;
-        if (window.hljs) window.hljs.highlightElement(code);
-      })
-      .catch(() => {
-        /* already showing the hint; nothing more to do */
-      });
-  }
-}
-
-function escapeHtml(s) {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+const zoomBound = new WeakSet();
+function bindZoom(figure) {
+  if (zoomBound.has(figure)) return;
+  zoomBound.add(figure);
+  figure.addEventListener("click", (e) => {
+    // Don't zoom when the user clicks something inside the offline details block.
+    if (e.target.closest("details, summary, pre, code, figcaption")) return;
+    openZoom(figure);
+  });
+  figure.style.cursor = "zoom-in";
 }
 
 // Full-screen pan/zoom overlay.
@@ -118,30 +125,30 @@ function openZoom(host) {
   close.textContent = "✕ 关闭 (Esc)";
   close.addEventListener("click", () => overlay.remove());
 
+  const controls = document.createElement("div");
+  controls.className = "zoom-controls";
+  const scale = { v: 1 };
+  const pos = { x: 0, y: 0 };
+
   const wrap = document.createElement("div");
   wrap.className = "zoom-stage";
   wrap.innerHTML = svg.outerHTML;
-  const innerSvg = wrap.querySelector("svg");
-  innerSvg.removeAttribute("style");
-
-  const controls = document.createElement("div");
-  controls.className = "zoom-controls";
-  const scale = { v: 1.0 };
-  const pos = { x: 0, y: 0 };
-  const render = () => {
-    innerSvg.style.transform = `translate(${pos.x}px, ${pos.y}px) scale(${scale.v})`;
+  const inner = wrap.querySelector("svg");
+  inner.removeAttribute("style");
+  const apply = () => {
+    inner.style.transform = "translate(" + pos.x + "px," + pos.y + "px) scale(" + scale.v + ")";
   };
+
   const addBtn = (label, fn) => {
     const b = document.createElement("button");
     b.textContent = label;
     b.addEventListener("click", fn);
     controls.appendChild(b);
   };
-  addBtn("＋ 放大", () => { scale.v = Math.min(8, scale.v * 1.25); render(); });
-  addBtn("－ 缩小", () => { scale.v = Math.max(0.2, scale.v / 1.25); render(); });
-  addBtn("复位", () => { scale.v = 1; pos.x = 0; pos.y = 0; render(); });
+  addBtn("＋ 放大", () => { scale.v = Math.min(8, scale.v * 1.25); apply(); });
+  addBtn("－ 缩小", () => { scale.v = Math.max(0.2, scale.v / 1.25); apply(); });
+  addBtn("复位", () => { scale.v = 1; pos.x = 0; pos.y = 0; apply(); });
 
-  // Drag to pan
   let dragging = false;
   let start = { x: 0, y: 0, ox: 0, oy: 0 };
   wrap.addEventListener("pointerdown", (e) => {
@@ -153,24 +160,17 @@ function openZoom(host) {
     if (!dragging) return;
     pos.x = start.ox + (e.clientX - start.x);
     pos.y = start.oy + (e.clientY - start.y);
-    render();
+    apply();
   });
   wrap.addEventListener("pointerup", () => { dragging = false; });
   wrap.addEventListener("pointercancel", () => { dragging = false; });
+  wrap.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    scale.v = Math.min(8, Math.max(0.2, scale.v * factor));
+    apply();
+  }, { passive: false });
 
-  // Wheel zoom (without consuming page scroll inside the overlay)
-  wrap.addEventListener(
-    "wheel",
-    (e) => {
-      e.preventDefault();
-      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-      scale.v = Math.min(8, Math.max(0.2, scale.v * factor));
-      render();
-    },
-    { passive: false },
-  );
-
-  overlay.addEventListener("keydown", () => {}); // keep focus
   const onKey = (e) => {
     if (e.key === "Escape") {
       overlay.remove();
@@ -192,41 +192,38 @@ function openZoom(host) {
   close.focus();
 }
 
-async function renderOne(host) {
-  // Prefer the external file (single source of truth) when present.
-  let source = "";
-  if (host.dataset.remote) source = host.textContent.trim();
-  if (host.dataset.source) {
+async function renderOne(figure) {
+  // data-source lives on the figure; pre.plantuml is just a hidden fallback container.
+  const pre = figure.querySelector("pre.plantuml");
+  let source = (pre && pre.textContent.trim()) || "";
+  if (figure.dataset.source) {
     try {
-      source = await fetchText(host.dataset.source);
-      host.dataset.remote = "ok";
-    } catch {
-      // Fall back to inline (set when fetched-from-cluster also fails later)
-      source = host.textContent.trim();
-      host.dataset.remote = "offline";
+      source = await fetchText(figure.dataset.source);
+    } catch (e) {
+      // keep whatever inline source we had; if also empty, offline branch shows a hint.
     }
-  } else {
-    source = host.textContent.trim();
+  }
+  if (!source) {
+    showOfflineSource(figure, "(无源码)", "未取到图源");
+    return;
   }
   try {
     const encoded = await encodePlantUml(source);
-    const url = PLANTUML_BASE + encoded;
-    const svg = await fetchText(url);
-    if (!svg || !svg.includes("<svg")) throw new Error("empty svg");
-    host.dataset.rendered = "1";
-    attachZoom(host, svg);
+    const svg = await fetchText(PLANTUML_BASE + encoded);
+    if (!svg || !svg.includes("<svg")) throw new Error("响应非 SVG");
+    attachSuccess(figure, svg);
   } catch (err) {
-    showError(host, source, err.message || String(err));
+    showOfflineSource(figure, source, err.message || String(err));
   }
 }
 
 async function renderAll() {
-  const hosts = Array.from(document.querySelectorAll("pre.plantuml, .plantuml-host"));
-  // Render in parallel; each is independent.
-  await Promise.all(hosts.map(renderOne));
-  // Re-run code highlighter for any error <pre><code> we just injected.
+  const figures = Array.from(document.querySelectorAll(".figure-wrap"));
+  await Promise.all(figures.map(renderOne));
+  // re-run code highlighter for any newly injected code (offline branch etc.)
   if (window.hljs) window.hljs.highlightAll();
 }
 
 window.McpSite = window.McpSite || {};
 window.McpSite.renderPlantUml = renderAll;
+window.McpSite.openZoom = openZoom;
