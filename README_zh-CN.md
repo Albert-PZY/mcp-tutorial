@@ -1,20 +1,34 @@
 # MCP 最小交互 Demo
 
-[English](./README.md) | [中文](./README_zh-CN.md)
+[中文](./README_zh-CN.md) | [English](./README.md) | [🏠 在线教学站点](https://albert-pzy.github.io/mcp-tutorial/)
 
-只需要启动程序，然后直接输入问题。
+一个最小化的 MCP（Model Context Protocol）教学 demo：一个 LLM 自动判断并调用
+FastMCP 提供的计算器工具（`add/subtract/multiply/divide`），通过标准 MCP 协议拿到结果，再给人类一句答案。
 
-当前结构（已拆分客户端/服务端）：
+> 这个仓库刻意保持小而清晰。想要更直观的可视化讲解（自动渲染的 PlantUML 图 + 语法高亮代码），请打开**在线教学站点**。
+
+## 这个 demo 学什么
+
+- 客户端和服务端如何通过 `initialize → tools/list → tools/call` 通信。
+- 三种传输方式：`stdio`、`sse`、`streamable_http` 的差别。
+- Function Calling（LLM 决策）和 MCP（工具传输）怎么配合。
+
+## 这个 demo **不**做什么
+
+- 不是生产级 Agent。没有流式输出、没有异步错误重试、没有多轮记忆。
+- 不是工具大全。只放 4 个最简单的计算器工具，目的是看懂协议而不是看工具。
+
+## 项目结构
 
 ```text
 mcp-tutorial/
-|-- main.py                  # 程序入口（客户端对话）
-|-- config.py                # 配置 schema 与 .env 读取
+|-- main.py                  # 程序入口（客户端交互循环）
+|-- config.py                # AppConfig 配置 schema + .env 读取
 |-- client/
 |   |-- runtime.py           # stdio/sse/streamable_http 客户端连接分发
-|   `-- llm.py               # OpenAI 初始化 + tool-calling
+|   `-- llm.py               # OpenAI 初始化 + 工具发现 + LLM 工具调用循环
 `-- server/
-    |-- app.py               # MCP server 与工具定义
+    |-- app.py               # FastMCP server + 四个 @mcp.tool 计算器
     |-- runtime.py           # stdio/sse/streamable_http 服务端启动分发
     |-- stdio.py             # stdio 服务端入口
     |-- sse.py               # sse 服务端入口
@@ -29,6 +43,8 @@ uv sync
 
 ## 2. 配置 `.env`
 
+把 `.env.example` 复制为 `.env`，填上你自己的 key：
+
 ```env
 OPENAI_API_KEY=你的百炼APIKey
 OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
@@ -42,9 +58,11 @@ MCP_STREAMABLE_PATH=/mcp
 LLM_MAX_TOOL_ROUNDS=3
 ```
 
+默认用阿里云百炼的 OpenAI 兼容接口；任何 OpenAI 兼容厂商都行。
+
 ## 3. 启动
 
-### 3.1 stdio（最简单）
+### 3.1 stdio（最简单，单终端）
 
 ```bash
 uv run python main.py
@@ -53,22 +71,15 @@ uv run python main.py
 启动后直接输入：
 
 ```text
-你：帮我计算一下1+2等于几
+你：帮我算一下 1+2 等于几
 助手：1 + 2 = 3
 ```
 
-输入 `exit` 可结束程序。
+输入 `exit` 结束程序。
 
 ### 3.2 sse（双终端）
 
-先改 `.env`：
-
-```env
-MCP_TRANSPORT=sse
-MCP_HOST=127.0.0.1
-MCP_PORT=8000
-MCP_SSE_PATH=/sse
-```
+在 `.env` 里设 `MCP_TRANSPORT=sse`。
 
 终端 A（服务端）：
 
@@ -82,18 +93,9 @@ uv run python -m server.sse
 uv run python main.py
 ```
 
-终端 B 输入问题，输入 `exit` 退出客户端；终端 A 用 `Ctrl+C` 停止服务端。
-
 ### 3.3 streamable_http（双终端）
 
-先改 `.env`：
-
-```env
-MCP_TRANSPORT=streamable_http
-MCP_HOST=127.0.0.1
-MCP_PORT=8000
-MCP_STREAMABLE_PATH=/mcp
-```
+在 `.env` 里设 `MCP_TRANSPORT=streamable_http`。
 
 终端 A（服务端）：
 
@@ -107,142 +109,40 @@ uv run python -m server.streamable_http
 uv run python main.py
 ```
 
-终端 B 输入问题，输入 `exit` 退出客户端；终端 A 用 `Ctrl+C` 停止服务端。
-
-## 4. MCP 零基础教学
-
-### 4.1 MCP 是什么
-
-MCP（Model Context Protocol）可以理解成：  
-给大模型和外部工具之间，定义了一套“统一插座标准”。
-
-以前你接不同工具，常常要写不同的适配代码；  
-有了 MCP 后，模型端和工具端只要都遵循这个协议，就能按统一方式通信。
-
-一句话总结：  
-MCP = 让模型更标准地“看见并调用”外部能力（工具、资源、提示模板）的协议。
-
-### 4.2 MCP 三种传输协议分别是什么
-
-在这个 demo 里用到三种传输方式（transport）：
-
-1. `stdio`
-通过标准输入/输出通信，通常是本地子进程方式，最适合教学和本地调试。
-
-2. `sse`
-基于 HTTP + Server-Sent Events，适合服务端长期运行，客户端通过网络连过去。
-
-3. `streamable_http`
-也是基于 HTTP 的方式，偏“标准 Web 服务”形态，适合做成可部署接口。
-
-注意：  
-这三种只是“怎么传数据”的区别，不改变 MCP 协议本身。
-
-### 4.3 三种协议的区别（怎么选）
+## 4. 三种传输一览
 
 | 维度 | `stdio` | `sse` | `streamable_http` |
 |---|---|---|---|
-| 连接方式 | 本地进程管道 | HTTP + 事件流 | HTTP |
-| 启动复杂度 | 最低（单命令） | 中等（服务端+客户端） | 中等（服务端+客户端） |
-| 典型场景 | 本地开发、演示 | 局域网/远程服务 | Web 化部署 |
-| 调试体验 | 最直接 | 需要看网络连通 | 需要看网络连通 |
+| 连接方式 | 本地进程管道 | HTTP + Server-Sent Events | HTTP 请求/响应 |
+| 启动复杂度 | 最低（单命令） | 中等（需服务端+客户端） | 中等（需服务端+客户端） |
+| 典型场景 | 本地开发 / 演示 | 局域网 / 远程服务 | Web 化部署 |
+| 调试体验 | 最直接 | 需看网络连通 | 需看网络连通 |
 
 快速建议：
+- 想最快跑通 → `stdio`。
+- 想模拟“客户端连远程服务” → `sse` 或 `streamable_http`。
+- 多人部署 → 优先 HTTP 形态（`sse` / `streamable_http`）。
 
-1. 想最快跑通：用 `stdio`。  
-2. 想模拟“客户端连远程服务”：用 `sse` 或 `streamable_http`。  
-3. 团队部署给多人用：优先考虑 HTTP 形态（`sse` / `streamable_http`）。
+三种方式只是“怎么把字节从客户端送到服务端”的区别，协议本身都是 MCP。
 
-### 4.4 MCP 和 Function Calling 的区别
+## 5. 图示（PlantUML 源码）
 
-你可能会问：都能调工具，那 MCP 和 function calling 有啥不同？
+仓库里保留的 PlantUML 源都放在 `docs/`：
 
-可以这样理解：
+- [`docs/architecture.puml`](./docs/architecture.puml) — 三层架构图
+- [`docs/call_sequence.puml`](./docs/call_sequence.puml) — 完整调用时序图（`1+2`）
+- [`docs/process_flow.puml`](./docs/process_flow.puml) — 客户端主流程活动图
+- [`docs/transport_comparison.puml`](./docs/transport_comparison.puml) — 三种传输并列对比
+- [`docs/mcp_vs_function_calling.puml`](./docs/mcp_vs_function_calling.puml) — MCP 与 Function Calling 职责对比
 
-1. Function Calling
-是“某一家模型接口里的工具调用能力”。  
-你把函数 schema 传给模型，模型决定要不要调用，再由你执行函数。
+在线教学站点会在浏览器里自动渲染这些图；想本地预览见 `site/README.md`。
 
-2. MCP
-是“模型与工具生态之间的通用协议层”。  
-重点是跨工具、跨运行方式、跨厂商的统一连接规范。
+## 6. 延伸阅读
 
-关系上可以理解为：
+- [MCP 工具调用完整过程](./docs/mcp_complete_call_flow_zh-CN.md) — 逐步从“发现”到“输出”讲解，带真实抓到的 JSON-RPC 报文。
 
-1. Function calling 更像“模型 API 内部能力”。  
-2. MCP 更像“外部工具总线标准”。  
-3. 实际工程里常见做法是：模型侧用 function calling 做决策，真正工具执行通过 MCP client/server 完成。  
+## 7. 约束（见 `AGENTS.md`）
 
-比如对于当前项目：  
-LLM 决策要调用 `add`，然后通过 MCP 去调用服务端工具。
-
-### 4.5 MCP 用到的 JSON-RPC 2.0 是什么
-
-JSON-RPC 2.0 是一个“用 JSON 表示远程调用”的轻量协议格式。  
-它规定了请求和响应长什么样，比如：
-
-请求（简化示意）：
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": {
-    "name": "add",
-    "arguments": {"a": 1, "b": 2}
-  }
-}
-```
-
-响应（简化示意）：
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "result": {
-    "content": [{"type": "text", "text": "3"}]
-  }
-}
-```
-
-MCP 消息在底层是按 JSON-RPC 2.0 这套“请求-响应”规则来组织的。
-
-### 4.6 MCP 的特性
-
-1. 标准化
-所有工具都通过统一的接口暴露能力，不需要每接入一个新工具就重写协议。就像电脑外设：无论是 U 盘、键盘还是鼠标，都能用同一套 USB 协议接入，插上就能用。
-
-2. 解耦
-模型决策层、客户端编排层、服务端工具层可以分开实现和演进。
-
-3. 便于迁移
-传输方式可以切换（`stdio`、`sse`、`streamable_http`），核心调用逻辑保持一致。
-
-### 4.7 MCP 完整工作流程
-
-下面按一次“帮我计算 1+2”的过程走一遍：
-
-1. 用户在 `main.py` 输入问题。  
-2. 客户端把可用 MCP tools 信息告诉 LLM（例如 `add(a, b)`）。  
-3. LLM 判断这是计算任务，返回“我要调用 `add`，参数是 `a=1,b=2`”。  
-4. 客户端收到这个 tool call，通过 MCP 协议向服务端发起调用。  
-5. 服务端 `server/app.py` 里的 `@mcp.tool add` 执行并返回结果 `3`。  
-6. 客户端把工具结果再喂给 LLM。  
-7. LLM 组织成人类可读回答，比如“1 + 2 = 3”。  
-8. 主程序把结果打印给用户。
-
-调用流程图：
-
-<img src="./docs/process_flow_zh-CN.png" alt="MCP 调用流程图" width="780" />
-
-你可以把它想成三层协作：
-
-1. LLM 负责“想”（是否调用工具、怎么调用）。  
-2. MCP 负责“传”（按标准协议通信）。  
-3. Tool 负责“做”（真正执行逻辑并产出结果）。
-
-## 补充文档
-
-- [MCP 工具调用完整过程（从发现到输出）](./docs/mcp_complete_call_flow_zh-CN.md)
+- Python 依赖只用 `uv`；不用 `pip install`。
+- 涉密本地放 `.env`（已 gitignore），仓库只留脱敏 `.env.example`。
+- 不提交任何真实 `OPENAI_API_KEY` / token / 密码 / 私钥。
