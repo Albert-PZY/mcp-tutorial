@@ -1,0 +1,36 @@
+@startuml mcp_vs_function_calling
+' MCP vs Function Calling 的职责边界对比
+' 不是二选一，而是“决策层 vs 通信层”
+
+skinparam backgroundColor #ffffff
+skinparam shadowing false
+skinparam roundCorner 8
+skinparam DefaultFontName "Segoe UI","Microsoft YaHei","Helvetica",sans-serif
+skinparam ArrowColor #475569
+
+title MCP vs Function Calling  职责对比
+
+rectangle "Function Calling\n(模型 API 能力)" as FC #eef2ff {
+  card "把函数 schema 喂给模型\n模型决定要不要调" as FC1 #e0e7ff
+  card "你负责把结果回填给模型\n拼接是手写的" as FC2 #e0e7ff
+  note bottom of FC : 依赖具体厂商 API\n跨工具/跨厂商时各写各的
+}
+
+rectangle "MCP\n(工具通信协议层)" as MCP #ecfeff {
+  card "tools/list 发现工具\ntools/call 执行工具\n统一 JSON-RPC" as M1 #cffafe
+  card "传输可选 stdio/sse/http\n工具实现可以是任意语言/进程" as M2 #cffafe
+  note bottom of MCP : 厂商/工具解耦\n模型端只对接 MCP client
+}
+
+(模型\n会不会调) -[hidden]-> FC
+FC --> MCP : 决策出来后\n走 MCP 调用层执行
+
+note as N1 #fff7ed
+  本 demo 的实际配合：
+  LLM 用 Function 决策 -> 客户端按 MCP 执行 -> 工具产出结果
+  两者不是二选一，而是“决策” + “传输/执行”的分工
+end note
+
+FC .. N1
+MCP .. N1
+@enduml

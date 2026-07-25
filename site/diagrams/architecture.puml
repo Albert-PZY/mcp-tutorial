@@ -1,0 +1,47 @@
+@startuml architecture
+' 三层架构：LLM 决策层 / MCP 编排层 / 工具执行层
+' 把整个项目“谁负责什么”画成一张静态类/组件图，便于 newbie 一眼对应到目录文件
+
+skinparam backgroundColor #ffffff
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam roundCorner 8
+skinparam ArrowColor #475569
+skinparam DefaultFontName "Segoe UI","Microsoft YaHei","Helvetica",sans-serif
+
+skinparam component {
+  BackgroundColor #f8fafc
+  BorderColor #94a3b8
+  FontColor #0f172a
+}
+
+title MCP Demo 三层架构  ArchitectureOverview
+
+actor "User\n用户" as U #f1f5f9
+
+package "决策层  LLM" #eef2ff {
+  component "OpenAI 兼容模型\n(qwen-plus@百炼)" as L #e0e7ff
+  note right of L : 只做“要不要调工具、用哪个、传什么参数”\n不直接执行工具
+}
+
+package "编排层  MCP Client  client/*" #ecfeff {
+  component "main.py\n对话主循环" as M #cffafe
+  component "client.llm\n工具发现 + LLM 循环" as CL #cffafe
+  component "client.runtime\n按 MCP_TRANSPORT 选连接方式" as CR #cffafe
+}
+
+package "执行层  MCP Server  server/*" #fff7ed {
+  component "server.app\n注册四个 @mcp.tool 计算器" as SA #fed7aa
+  component "server.runtime\n按协议启动(stdio/sse/http)" as SR #fed7aa
+}
+
+U --> M : 终端输入问题
+M --> CL : ask_with_llm(...)
+CL --> CR : create_mcp_client(config)
+CL --> L : chat.completions.create(tools)
+CL --> SA : tools/list  tools/call (JSON-RPC)
+SR --> SA : 托管工具
+SA --> CL : CallToolResult
+CL --> L : 回填 tool 结果 \n 产出最终回答
+M --> U : 打印助手回复
+@enduml
