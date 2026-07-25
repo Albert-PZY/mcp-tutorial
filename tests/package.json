@@ -1,0 +1,14 @@
+{
+  "name": "mcp-tutorial-site-tests",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Playwright browser self-tests for the mcp-tutorial site/ tutorial page.",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0"
+  }
+}
