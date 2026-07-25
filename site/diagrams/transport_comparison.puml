@@ -1,0 +1,43 @@
+@startuml transport_comparison
+' 三种传输方式的连接结构对比（并列三泳道）
+' 只画“怎么连”，不画协议方法 —— 协议方法三种一致，不重复
+
+skinparam backgroundColor #ffffff
+skinparam shadowing false
+skinparam roundCorner 8
+skinparam DefaultFontName "Segoe UI","Microsoft YaHei","Helvetica",sans-serif
+skinparam ArrowColor #475569
+
+title 三种传输：连接方式对比  TransportComparison
+
+skinparam swimlane {
+  BorderColor #cbd5e1
+  TitleFontColor #0f172a
+}
+
+|stdio|
+skinparam component {BackgroundColor #e0f2fe BorderColor #0284c7}
+component "main.py + MCP Client" as StC #e0f2fe
+component "server/stdio.py\n(子进程)" as StS #bae6fd
+StC -> StS : 标准输入 (stdin)
+StS -> StC : 标准输出 (stdout)
+note bottom of StS : 单进程命令即跑\nuv run python main.py
+
+|sse (HTTP+SSE)|
+skinparam component {BackgroundColor #ecfeff BorderColor #0e7490}
+component "MCP Server\nserver.sse (长驻)" as SeS #cffafe
+component "main.py + MCP Client\n(连 /sse)" as SeC #a5f3fc
+cloud "HTTP 通道\nServer-Sent Events" as SeN #e0f7fa
+SeC --> SeN : HTTP 长连接
+SeN --> SeS : 单向事件流
+SeC <-- SeS : SSE 推送 / JSON-RPC 应答
+note bottom of SeS : 终端 A 跑 server, 终端 B 跑 client\n适合远程/局域网
+
+|streamable_http|
+skinparam component {BackgroundColor #f3e8ff BorderColor #7e22ce}
+component "MCP Server\nserver.streamable_http (长驻)" as HtS #e9d5ff
+component "main.py + MCP Client\n(连 /mcp)" as HtC #d8b4fe
+HtC <-> HtS : HTTP 请求/响应\n(streamable)
+note bottom of HtS : 标准 HTTP 端点\n最适合 Web 化/多客户端部署
+
+@enduml

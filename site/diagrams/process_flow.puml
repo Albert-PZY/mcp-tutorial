@@ -1,0 +1,49 @@
+@startuml process_flow
+' 客户端主流程活动图：含三种传输分支与 LLM<->MCP 循环
+' 对应 main.py + ask_with_llm 的真实控制流
+
+skinparam backgroundColor #ffffff
+skinparam shadowing false
+skinparam roundCorner 10
+skinparam DefaultFontName "Segoe UI","Microsoft YaHei","Helvetica",sans-serif
+skinparam ActivityBackgroundColor #f8fafc
+skinparam ActivityBorderColor #94a3b8
+skinparam ActivityDiamondBackgroundColor #fef9c3
+skinparam ActivityDiamondBorderColor #ca8a04
+skinparam ArrowColor #475569
+
+title 客户端主流程  ProcessFlow
+
+start
+
+:[1] uv run python main.py;
+:[2] AppConfig.from_env() 读取 .env;
+if ([3] MCP_TRANSPORT?) then (stdio)
+  :子进程方式拉起 server/stdio.py;
+elseif (sse) then (sse)
+  :连 http://host:port/sse;
+else (streamable_http)
+  :连 http://host:port/mcp;
+endif
+
+:[4] async with mcp_client  建立会话+握手;
+repeat
+  :[5] input() 读用户输入;
+  if ([6] 输入 = exit ?) then (yes)
+    break 结束程序
+  else (no)
+    :[7] ask_with_llm();
+    :[8] mcp_client.list_tools()\n发现工具;
+    :[9] 把 MCP 工具转成 OpenAI tools;
+    repeat :[10] 调 LLM 一次\n(asyncio.to_thread);
+      if ([11] 返回了 tool_calls?) then (yes)
+        :[12] 逐个 mcp_client.call_tool()\n服务端执行 add/sub/mul/div;
+        :[13] 把 tool 结果回填进 messages;
+      else (no)
+        :[14] 输出最终自然语言回答;
+      endif
+    repeat while (返回了 tool_calls ?)
+  endif
+repeat
+stop
+@enduml

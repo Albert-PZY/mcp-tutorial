@@ -1,131 +1,110 @@
 # MCP Tool Call Complete Process
 
-This document focuses on one specific question:
-In this demo, how does an MCP tool (`calculator_add`) move from "being discovered" to "being called", and finally return the result to the user?
+This document answers one specific question:
+In this demo, how does an MCP tool (`calculator_add`) actually go from "discovered" to "called",
+and finally return the answer to the user — end to end.
 
-## 1. First, the roles involved
+For the visual version see the Live Tutorial Site; the sequence diagram source is
+[`./call_sequence.puml`](./call_sequence.puml).
+
+## 1. Roles in one call
 
 There are 4 roles in one complete call:
 
-1. User: enters a question in terminal (for example, "help me calculate 1+2").
-2. Client program: `main.py + client/*`, responsible for MCP connection, LLM interaction, and forwarding tool calls.
-3. MCP server: `server/*`, actually provides tools (for example, `@mcp.tool(name="calculator_add", ...)`).
-4. LLM: decides whether a tool is needed, which tool to use, and what arguments to pass.
+1. **User** — types a question in the terminal, e.g. "help me calculate 1+2".
+2. **Client program** — `main.py + client/*`: holds the MCP connection, talks to the LLM, forwards tool calls.
+3. **MCP server** — `server/*`: actually provides the tools (`@mcp.tool(name="calculator_add", ...)`).
+4. **LLM** — decides whether a tool is needed, which one, and what arguments to pass.
+
+A useful mental model: **LLM thinks, MCP carries, Tool does.**
 
 ## 2. Key code locations
 
-1. `server/app.py`: registers `calculator_add/calculator_subtract/calculator_multiply/calculator_divide` with `@mcp.tool()`.
-2. `server/runtime.py`: starts FastMCP server by protocol (`stdio/sse/streamable-http`).
-3. `client/runtime.py`: creates MCP Client based on configuration.
-4. `client/llm.py`: handles tool discovery, LLM decision, tool execution, and result injection.
-5. `main.py`: chat loop entry, receives user input and prints final answer.
+1. `server/app.py` — registers the four calculator tools via `@mcp.tool()`.
+2. `server/runtime.py` — starts FastMCP by transport (`stdio/sse/streamable-http`).
+3. `client/runtime.py` — creates the MCP `Client` according to `MCP_TRANSPORT`.
+4. `client/llm.py` — tool discovery, LLM decision, tool execution, result feedback.
+5. `main.py` — chat loop entry; reads input, prints final answer.
 
-## 3. Full flow overview (big picture first)
+## 3. Full sequence at a glance
 
-<img src="./mcp_call_sequence.png" alt="MCP tool call sequence" width="780" />
+The full sequence diagram source lives at `docs/call_sequence.puml`; rendered when you open the Live Tutorial Site.
+Phase order: **handshake → discovery → decision → execution → feedback → output**.
 
-## 4. Step-by-step: what exactly happens at each step
+## 4. Step-by-step
 
-### Step A: Server exposes tools first
+### Step A — Server exposes tools first
 
-In server code (`server/app.py`):
-
+In `server/app.py`:
 - `mcp = FastMCP("Test Server")`
-- `@mcp.tool()` decorates `add(a: int, b: int) -> int` and maps it to tool name `calculator_add`
+- `@mcp.tool(name="calculator_add", ...)` wraps `add(a: int, b: int) -> int`.
 
-What this means:
-The MCP Server exposes multiple remotely callable tools. In this example, one tool is `calculator_add`, and its input schema requires integer `a` and `b`.
+FastMCP auto-generates `inputSchema` from the function's type hints, so no hand-written JSON Schema is needed.
+At this point an MCP Server has remotely-callable tools; one of them is `calculator_add` taking integers `a` and `b`.
 
-### Step B: Client establishes MCP session and performs handshake
+### Step B — Connect and handshake
 
-When `main.py` enters `async with mcp_client as client`, connection and initialization are triggered:
+When `main.py` enters `async with mcp_client as client`:
 
-1. Client connects to server (transport depends on `MCP_TRANSPORT`).
-2. Sends JSON-RPC request: `initialize`
-3. After receiving server capability info, sends notification: `notifications/initialized`
+1. Client connects to the server (transport depends on `MCP_TRANSPORT`).
+2. Client sends JSON-RPC `initialize` with its `protocolVersion` + `clientInfo`.
+3. Server replies with its `protocolVersion`, `capabilities`, `serverInfo`.
+4. Client sends notification `notifications/initialized`.
 
-After this step, both sides are considered "protocol-ready".
+After this both sides are "protocol-ready".
 
-### Step C: Tool discovery first
+### Step C — Tool discovery
 
-The first action in `client/llm.py` is:
+First action inside `ask_with_llm()`:
+- `await mcp_client.list_tools()` → JSON-RPC `tools/list`.
 
-- `await mcp_client.list_tools()`
+Response includes the four `calculator_*` tools, each with
+`name / title / description / inputSchema` (and possibly `outputSchema / _meta`).
 
-Protocol operation:
+### Step D — Hand tool info to the LLM for decision
 
-- JSON-RPC: `tools/list`
+`to_openai_tools(...)` turns the MCP tool list into the OpenAI `tools` argument and sends it to the LLM
+together with the user's question. The LLM returns one of:
+1. Direct answer (no tool call), or
+2. `tool_calls` — here, `calculator_add(a=1, b=2)`.
 
-The response includes at least:
+### Step E — Execute the tool call(s)
 
-1. Tool name: `calculator_add` (and other `calculator_*` tools)
-2. Input schema (`a` and `b` types)
-3. Possibly `outputSchema`, `_meta`, etc. (depends on implementation/version)
+For each `tool_call` the client calls:
+- `await mcp_client.call_tool(name, arguments)` → JSON-RPC `tools/call`.
 
-### Step D: Pass tool information to the LLM for decision-making
+Request body: `{ name: "calculator_add", arguments: {"a": 1, "b": 2} }`.
+The server runs the actual Python function and returns a `CallToolResult`.
 
-Inside `ask_with_llm()`, MCP tools are converted into the model-recognizable `tools` parameter and sent to the LLM together with:
+### Step F — Feed tool result back to the LLM
 
-1. User question (for example, "1+2")
-2. Available tool list (including `calculator_add` schema)
+The client wraps each `CallToolResult` as a `role: "tool"` message
+(with `tool_call_id`, `name`, `content`) and appends it to `messages`.
+Then it calls the LLM again so the model can produce the final natural-language reply
+based on the tool execution result (`3`).
 
-Then the LLM returns one of two outcomes:
+### Step G — Output to user
 
-1. Direct answer (no tool call)
-2. `tool_calls` (in this case, call `calculator_add`)
+`main.py` just prints: `助手：1 + 2 = 3`.
+One complete end-to-end flow is done.
 
-### Step E: Client executes tool calls
+## 5. Which JSON-RPC operations appear at protocol level
 
-If LLM returns `tool_calls`, the client iterates and runs:
+In order, exactly these core operations:
 
-- `await mcp_client.call_tool(call.function.name, arguments)`
+1. `initialize` — session handshake.
+2. `notifications/initialized` — "initialization done, normal requests can start".
+3. `tools/list` — query currently available tools (discovery).
+4. `tools/call` — run a tool by name + arguments.
 
-Protocol operation:
+Mnemonic: **Handshake → Discover → Call → Feed back**.
 
-- JSON-RPC: `tools/call`
+## 6. Real captured payloads (stdio)
 
-The request contains:
+Below are real MCP payloads captured from one local run of `list_tools + call_tool(calculator_add)`,
+in chronological order.
 
-1. Tool name: `calculator_add`
-2. Arguments: `{"a": 1, "b": 2}`
-
-After receiving it, server executes `calculator_add` and returns `CallToolResult`.
-
-### Step F: Feed tool result back to LLM
-
-After client receives `CallToolResult`, it wraps it into a `tool` role message and appends to `messages`:
-
-1. `tool_call_id` (for this call)
-2. `name` (tool name)
-3. `content` (tool output, such as `3`)
-
-Then it calls LLM again so the model can generate the final natural-language response based on tool execution result.
-
-### Step G: Return to user
-
-`main.py` prints the final text directly:
-
-- `Assistant: 1 + 2 = 3`
-
-At this point, one complete end-to-end flow is done.
-
-## 5. Which MCP operations appear at protocol level
-
-In order, the core operations are exactly these 4:
-
-1. `initialize`: session initialization handshake.
-2. `notifications/initialized`: tells server "initialization is done, formal requests can start".
-3. `tools/list`: query currently available tools (tool discovery).
-4. `tools/call`: execute a specific tool by name and arguments.
-
-You can remember it as one sentence:
-**Handshake first, then discovery, then invocation, then feed result back to the model.**
-
-## 6. Real captured payloads (`stdio`)
-
-Below are real MCP payloads captured from one local run of `list_tools + call_tool(calculator_add)` (in chronological order).
-
-### 6.1 initialize (request + response)
+### 6.1 `initialize` (request + response)
 
 ```json
 {
@@ -135,10 +114,7 @@ Below are real MCP payloads captured from one local run of `list_tools + call_to
   "params": {
     "protocolVersion": "2025-11-25",
     "capabilities": {},
-    "clientInfo": {
-      "name": "mcp",
-      "version": "0.1.0"
-    }
+    "clientInfo": { "name": "mcp", "version": "0.1.0" }
   }
 }
 ```
@@ -151,45 +127,26 @@ Below are real MCP payloads captured from one local run of `list_tools + call_to
     "protocolVersion": "2025-11-25",
     "capabilities": {
       "experimental": {},
-      "prompts": {
-        "listChanged": false
-      },
-      "resources": {
-        "subscribe": false,
-        "listChanged": false
-      },
-      "tools": {
-        "listChanged": true
-      },
-      "extensions": {
-        "io.modelcontextprotocol/ui": {}
-      }
+      "prompts": { "listChanged": false },
+      "resources": { "subscribe": false, "listChanged": false },
+      "tools": { "listChanged": true },
+      "extensions": { "io.modelcontextprotocol/ui": {} }
     },
-    "serverInfo": {
-      "name": "Test Server",
-      "version": "3.1.1"
-    }
+    "serverInfo": { "name": "Test Server", "version": "3.1.1" }
   }
 }
 ```
 
-### 6.2 notifications/initialized (notification)
+### 6.2 `notifications/initialized` (notification)
 
 ```json
-{
-  "jsonrpc": "2.0",
-  "method": "notifications/initialized"
-}
+{ "jsonrpc": "2.0", "method": "notifications/initialized" }
 ```
 
-### 6.3 tools/list (request + response)
+### 6.3 `tools/list` (request + response)
 
 ```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/list"
-}
+{ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }
 ```
 
 ```json
@@ -204,158 +161,25 @@ Below are real MCP payloads captured from one local run of `list_tools + call_to
         "description": "Add two numbers",
         "inputSchema": {
           "additionalProperties": false,
-          "properties": {
-            "a": {
-              "type": "integer"
-            },
-            "b": {
-              "type": "integer"
-            }
-          },
-          "required": [
-            "a",
-            "b"
-          ],
+          "properties": { "a": { "type": "integer" }, "b": { "type": "integer" } },
+          "required": ["a", "b"],
           "type": "object"
         },
         "outputSchema": {
-          "properties": {
-            "result": {
-              "type": "integer"
-            }
-          },
-          "required": [
-            "result"
-          ],
+          "properties": { "result": { "type": "integer" } },
+          "required": ["result"],
           "type": "object",
           "x-fastmcp-wrap-result": true
         },
-        "_meta": {
-          "fastmcp": {
-            "tags": []
-          }
-        }
-      },
-      {
-        "name": "calculator_subtract",
-        "title": "Calculator Subtract",
-        "description": "Subtract second number from first number",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "a": {
-              "type": "integer"
-            },
-            "b": {
-              "type": "integer"
-            }
-          },
-          "required": [
-            "a",
-            "b"
-          ],
-          "type": "object"
-        },
-        "outputSchema": {
-          "properties": {
-            "result": {
-              "type": "integer"
-            }
-          },
-          "required": [
-            "result"
-          ],
-          "type": "object",
-          "x-fastmcp-wrap-result": true
-        },
-        "_meta": {
-          "fastmcp": {
-            "tags": []
-          }
-        }
-      },
-      {
-        "name": "calculator_multiply",
-        "title": "Calculator Multiply",
-        "description": "Multiply two numbers",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "a": {
-              "type": "integer"
-            },
-            "b": {
-              "type": "integer"
-            }
-          },
-          "required": [
-            "a",
-            "b"
-          ],
-          "type": "object"
-        },
-        "outputSchema": {
-          "properties": {
-            "result": {
-              "type": "integer"
-            }
-          },
-          "required": [
-            "result"
-          ],
-          "type": "object",
-          "x-fastmcp-wrap-result": true
-        },
-        "_meta": {
-          "fastmcp": {
-            "tags": []
-          }
-        }
-      },
-      {
-        "name": "calculator_divide",
-        "title": "Calculator Divide",
-        "description": "Divide first number by second number (b must not be zero)",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "a": {
-              "type": "integer"
-            },
-            "b": {
-              "type": "integer"
-            }
-          },
-          "required": [
-            "a",
-            "b"
-          ],
-          "type": "object"
-        },
-        "outputSchema": {
-          "properties": {
-            "result": {
-              "type": "number"
-            }
-          },
-          "required": [
-            "result"
-          ],
-          "type": "object",
-          "x-fastmcp-wrap-result": true
-        },
-        "_meta": {
-          "fastmcp": {
-            "tags": []
-          }
-        }
+        "_meta": { "fastmcp": { "tags": [] } }
       }
+      // ...calculator_subtract / calculator_multiply / calculator_divide share the same shape
     ]
   }
 }
 ```
 
-### 6.4 tools/call (request + response)
+### 6.4 `tools/call` (request + response)
 
 ```json
 {
@@ -364,10 +188,7 @@ Below are real MCP payloads captured from one local run of `list_tools + call_to
   "method": "tools/call",
   "params": {
     "name": "calculator_add",
-    "arguments": {
-      "a": 1,
-      "b": 2
-    }
+    "arguments": { "a": 1, "b": 2 }
   }
 }
 ```
@@ -377,48 +198,31 @@ Below are real MCP payloads captured from one local run of `list_tools + call_to
   "jsonrpc": "2.0",
   "id": 2,
   "result": {
-    "content": [
-      {
-        "type": "text",
-        "text": "3"
-      }
-    ],
-    "structuredContent": {
-      "result": 3
-    },
+    "content": [{ "type": "text", "text": "3" }],
+    "structuredContent": { "result": 3 },
     "isError": false
   }
 }
 ```
 
-## 7. What changes under three transports?
+## 7. What changes under the three transports?
 
-Answer: **The main flow stays the same. Only connection mode changes.**
+Answer: **the main flow is identical. Only how bytes are carried changes.**
 
-1. `stdio`
-Client starts and connects server process through standard input/output.
+1. `stdio` — client spawns the server process and talks over stdin/stdout.
+2. `sse` — client connects via HTTP + Server-Sent Events to a long-running server.
+3. `streamable_http` — client connects to the server's HTTP MCP endpoint.
 
-2. `sse`
-Client connects to an already-running server via HTTP + SSE.
-
-3. `streamable_http`
-Client connects to server's streamable endpoint via HTTP.
-
-No matter which transport you use, the steps remain:
-
-1. initialize
-2. tools/list
-3. tools/call
-4. feed result back to LLM
-5. output final answer
+Regardless of transport the steps stay:
+`initialize → tools/list → tools/call → feed result back to the LLM → output final answer`.
 
 ## 8. Common misunderstandings
 
-1. Misunderstanding: MCP automatically decides which tool to call.  
-Reality: the decision is usually made by LLM; MCP standardizes communication and execution.
+1. **Myth:** MCP automatically decides which tool to call.
+   **Reality:** the LLM decides; MCP standardizes transport + execution.
 
-2. Misunderstanding: once `@mcp.tool` exists, it will be called automatically.  
-Reality: client must discover it via `tools/list`, then LLM must generate `tool_call`.
+2. **Myth:** if `@mcp.tool` is decorated, it gets called automatically.
+   **Reality:** the client must discover it via `tools/list`, then the LLM must emit a `tool_call`.
 
-3. Misunderstanding: changing transport requires changing business logic.  
-Reality: usually tool logic stays unchanged; only connection/startup mode changes.
+3. **Myth:** changing transport requires changing business logic.
+   **Reality:** tool logic is unchanged; only how the connection starts.

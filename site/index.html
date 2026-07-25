@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MCP 教学站点 · mcp-tutorial</title>
+<meta name="description" content="MCP (Model Context Protocol) 零基础可视化讲解：架构、源码逻辑、完整调用流程、应用场景与三种传输对比。" />
+<link rel="stylesheet" href="assets/style.css" />
+<!-- highlight.js (GitHub-light, only python + json + bash kept small) -->
+<link rel="stylesheet"
+  href="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/styles/github.min.css" />
+<script defer src="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/lib/highlight.min.js"></script>
+<script defer src="assets/plantuml.js"></script>
+</head>
+<body>
+<div class="layout">
+
+  <!-- Sidebar nav -->
+  <aside class="sidebar">
+    <p class="brand">MCP 教学站点</p>
+    <p class="brand-sub">mcp-tutorial · 零基础可视化讲解</p>
+    <nav>
+      <a href="#intro">1. MCP 是什么</a>
+      <a href="#architecture" class="sub">三层架构</a>
+      <a href="#source">2. 源码逻辑实现</a>
+      <a href="#source-main" class="sub">main.py / config.py</a>
+      <a href="#source-client" class="sub">client/*</a>
+      <a href="#source-server" class="sub">server/*</a>
+      <a href="#flow">3. 完整调用流程</a>
+      <a href="#flow-sequence" class="sub">时序图</a>
+      <a href="#flow-payloads" class="sub">真实 JSON-RPC</a>
+      <a href="#scenarios">4. 通用应用场景</a>
+      <a href="#comparison" class="sub">MCP vs Function Calling</a>
+      <a href="#transports">5. 三种传输对比</a>
+      <a href="#run" class="sub">怎么在本机跑</a>
+    </nav>
+  </aside>
+
+  <!-- Main content -->
+  <main class="content">
+
+    <header class="hero">
+      <h1>MCP 教学站点</h1>
+      <p>Model Context Protocol，零基础可视化讲解：从一个“1+2”问题出发，看 LLM 怎么想、MCP 怎么传、工具怎么做。</p>
+      <div class="badges">
+        <span>📦 仓库: Albert-PZY/mcp-tutorial</span>
+        <span>🐍 Python · FastMCP</span>
+        <span>🌐 PlantUML 在线渲染</span>
+      </div>
+    </header>
+
+    <!-- =================== 1. MCP 是什么 =================== -->
+    <section id="intro">
+      <h1>1. MCP 是什么</h1>
+
+      <p><strong>MCP（Model Context Protocol）</strong>可以理解为：给大模型与外部工具之间定义了一套“统一插座标准”。</p>
+      <p>以前每接一个工具常常要写不同的适配代码；有了 MCP，模型端和工具端只要都遵循这个协议，就能统一方式通信。</p>
+      <blockquote>一句话定位：MCP = 让模型更标准地“看见并调用”外部能力（工具 / 资源 / 提示模板）的协议层。</blockquote>
+
+      <div class="three-role">
+        <div class="role-card role-think">
+          <h4>🧠 LLM 想</h4>
+          <p>判断要不要调工具、用哪个、传什么参数。不亲自执行。</p>
+        </div>
+        <div class="role-card role-carry">
+          <h4>🚚 MCP 传</h4>
+          <p>按 JSON-RPC 标准把“决策 <-> 执行”串起来，跨工具/传输通用。</p>
+        </div>
+        <div class="role-card role-do">
+          <h4>🛠️ Tool 做</h4>
+          <p>真正实现功能并返回结果。可以是任意语言/任意进程。</p>
+        </div>
+      </div>
+
+      <h2>1.1 三层架构</h2>
+      <p>本项目把这套心智模型落地成代码层：<strong>决策层（LLM）</strong> / <strong>编排层（MCP Client）</strong> / <strong>执行层（MCP Server）</strong>。</p>
+
+      <figure class="figure-wrap" data-figure="architecture">
+        <pre class="plantuml" data-source="diagrams/architecture.puml"></pre>
+      </figure>
+    </section>
+
+    <!-- =================== 2. 源码逻辑实现 =================== -->
+    <section id="source">
+      <h1>2. 源码逻辑实现</h1>
+
+      <p>下面按文件路径顺序讲，每个文件都配关键代码。完整代码见仓库内文件本身。</p>
+
+      <h2>2.1 入口与配置（main.py / config.py）</h2>
+      <h3 id="source-main">main.py：交互主循环</h3>
+      <p>它读用户输入 → 让 <code>ask_with_llm</code> 走一遍 → 打印回复。一段 <code>async with mcp_client</code> 进会话，等同同时完成 MCP 握手。</p>
+      <pre><code class="language-python">from __future__ import annotations
+import asyncio
+
+from client.llm import ask_with_llm, create_openai_client
+from client.runtime import create_mcp_client
+from config import AppConfig
+
+
+async def run_chat(config: AppConfig) -> None:
+    llm_client = create_openai_client(config)
+    mcp_client = create_mcp_client(config)
+    async with mcp_client as client:           # 进入会话 = initialize + initialized
+        print("输入问题开始对话，输入 exit 退出。")
+        while True:
+            user_prompt = input("你：").strip()
+            if user_prompt == "exit":
+                return
+            answer = await ask_with_llm(client, llm_client, config, user_prompt)
+            print(f"助手：{answer}")
+
+
+def main() -> None:
+    asyncio.run(run_chat(AppConfig.from_env()))
+</code></pre>
+
+      <h3>config.py：统一配置 schema</h3>
+      <p>把所有可配置项放在一个 pydantic 模型里，统一从 <code>.env</code> 读取，避免散落的 <code>os.getenv</code>。</p>
+      <pre><code class="language-python">TransportType = Literal["stdio", "sse", "streamable_http"]
+
+class AppConfig(BaseModel):
+    openai_api_key: str
+    openai_base_url: str
+    openai_model: str
+    mcp_transport: TransportType      # 三选一
+    mcp_host: str
+    mcp_port: int
+    mcp_sse_path: str
+    mcp_streamable_path: str
+    llm_max_tool_rounds: int           # 防止无线循环
+
+    @classmethod
+    def from_env(cls) -> "AppConfig":
+        load_dotenv()
+        return cls(
+            openai_api_key=os.getenv("OPENAI_API_KEY", ""),
+            openai_model=os.getenv("OPENAI_MODEL", "qwen-plus"),
+            mcp_transport=os.getenv("MCP_TRANSPORT", "stdio"),
+            ...
+        )</code></pre>
+
+      <h2>2.2 客户端 client/*<span id="source-client"></span></h2>
+
+      <h3>client/runtime.py：按 MCP_TRANSPORT 选连接方式</h3>
+      <p>协议方法三种一致，差别只在“怎么连”。stdio 走子进程；sse / http 走网络 URL。</p>
+      <pre><code class="language-python">def create_mcp_client(config: AppConfig) -> Client:
+    if config.mcp_transport == "stdio":
+        return create_stdio_client()                       # 子进程 + stdin/stdout
+    if config.mcp_transport == "sse":
+        return create_sse_client(config)                    # http://host:port/sse
+    return create_streamable_http_client(config)           # http://host:port/mcp</code></pre>
+      <div class="tip">stdio 子进程要能 <code>import config / server.app</code>，所以客户端把项目根塞进 <code>PYTHONPATH</code> 再拉起子进程。</div>
+
+      <h3>client/llm.py：工具发现 + LLM 工具调用循环</h3>
+      <p>这是教学价值最高的文件。逻辑分四步：(1) list_tools 发现工具 → (2) 转成 OpenAI tools → (3) 调 LLM 决策 → (4) LLM 要调就执行 MCP 工具并回填结果。</p>
+      <pre><code class="language-python">async def ask_with_llm(mcp_client, llm_client, config, user_prompt) -> str:
+    openai_tools = to_openai_tools(await mcp_client.list_tools())
+    messages = [
+        {"role": "system", "content": "你是教学演示助手..."},
+        {"role": "user", "content": user_prompt},
+    ]
+    for _ in range(config.llm_max_tool_rounds):
+        completion = await asyncio.to_thread(
+            llm_client.chat.completions.create,        # 阻塞 SDK -> 放进线程
+            model=config.openai_model,
+            messages=messages, tools=openai_tools,
+            tool_choice="auto", temperature=0,
+        )
+        message = completion.choices[0].message
+        tool_calls = message.tool_calls or []
+        if not tool_calls:
+            return (message.content or "").strip()      # 不调工具 = 最终答案
+        messages.append(_assistant_message_with_calls(message))
+        for call in tool_calls:
+            args = json.loads(call.function.arguments or "{}")
+            result = await mcp_client.call_tool(call.function.name, args)
+            messages.append(_tool_result_message(call, result))
+    return ""</code></pre>
+      <div class="tip"><strong>为什么要 <code>asyncio.to_thread</code></strong>：openai 官方 SDK 是同步阻塞的，直接调用会卡住事件循环，下一步的 <code>await mcp_client.call_tool</code> 不能并发，所以必须把它丢到工作线程里跑。</div>
+
+      <p>其中两个小工具函数把对话历史拼装明了化（行为零变化，只是可读性）：</p>
+      <pre><code class="language-python">def _assistant_message_with_calls(message) -> dict:
+    """把 LLM 的 tool 连同它的 tool_calls 一起打包成 assistant 消息。"""
+    return {"role": "assistant", "content": message.content or "",
+            "tool_calls": [{"id": c.id, "type": "function",
+                            "function": {"name": c.function.name,
+                                         "arguments": c.function.arguments}}
+                           for c in (message.tool_calls or [])]}
+
+def _tool_result_message(call, result) -> dict:
+    """把一次工具调用结果回填成 role=tool 的消息，供 LLM 二次推理。"""
+    return {"role": "tool", "tool_call_id": call.id,
+            "name": call.function.name,
+            "content": json.dumps({"result": _tool_result_text(result)},
+                                  ensure_ascii=False)}</code></pre>
+
+      <h2>2.3 服务端 server/*<span id="source-server"></span></h2>
+
+      <h3>server/app.py：注册 4 个计算器工具</h3>
+      <p>用 <code>@mcp.tool</code> 把普通 Python 函数登记成 MCP 工具。FastMCP 会读类型注解自动生成 <code>inputSchema</code>，所以完全不用手写 JSON Schema。</p>
+      <pre><code class="language-python">def create_mcp_server() -> FastMCP:
+    mcp = FastMCP("Test Server")
+
+    @mcp.tool(name="calculator_add", title="Calculator Add",
+              description="Add two numbers")
+    def add(a: int, b: int) -> int:
+        return a + b
+    # ... subtract / multiply / divide 同款登记
+    # divide 里 b == 0 时抛 ValueError，让调用方看到非法状态
+    return mcp</code></pre>
+
+      <h3>server/runtime.py：按协议启动</h3>
+      <pre><code class="language-python">def run_server_by_transport(config: AppConfig) -> None:
+    if config.mcp_transport == "stdio":           run_server_stdio(config)
+    elif config.mcp_transport == "sse":           run_server_sse(config)
+    else:                                         run_server_streamable_http(config)</code></pre>
+
+      <h2>2.4 主流程活动图</h2>
+      <p>把“客户端”一整条主线画成活动图，包含三传输分支与 LLM↔MCP 循环。</p>
+
+      <figure class="figure-wrap" data-figure="process_flow">
+        <pre class="plantuml" data-source="diagrams/process_flow.puml"></pre>
+      </figure>
+    </section>
+
+    <!-- =================== 3. 完整调用流程 =================== -->
+    <section id="flow">
+      <h1>3. 完整调用流程</h1>
+
+      <p>以“<strong>帮我算 1+2</strong>”这一句话为线索，把整条调用走一遍。本次涉及 4 个角色：用户 / 客户端 / 服务端 / LLM。</p>
+
+      <h2 id="flow-sequence">3.1 时序图</h2>
+      <figure class="figure-wrap" data-figure="call_sequence">
+        <pre class="plantuml" data-source="diagrams/call_sequence.puml"></pre>
+      </figure>
+      <p>分五个阶段：握手 → 发现 → 决策 → 执行 → 回填输出。下面是每段对应的真实 JSON-RPC 报文。</p>
+
+      <h2 id="flow-payloads">3.2 真实 JSON-RPC 报文（stdio 抓包）</h2>
+
+      <h3>① initialize — 握手请求</h3>
+      <pre><code class="language-json">{
+  "jsonrpc": "2.0",
+  "id": 0,
+  "method": "initialize",
+  "params": {
+    "protocolVersion": "2025-11-25",
+    "capabilities": {},
+    "clientInfo": { "name": "mcp", "version": "0.1.0" }
+  }
+}</code></pre>
+      <h3>② initialize — 握手响应</h3>
+      <pre><code class="language-json">{
+  "jsonrpc": "2.0",
+  "id": 0,
+  "result": {
+    "protocolVersion": "2025-11-25",
+    "capabilities": {
+      "prompts": { "listChanged": false },
+      "resources": { "subscribe": false, "listChanged": false },
+      "tools": { "listChanged": true }
+    },
+    "serverInfo": { "name": "Test Server", "version": "3.1.1" }
+  }
+}</code></pre>
+      <h3>③ notifications/initialized — 通知</h3>
+      <pre><code class="language-json">{ "jsonrpc": "2.0", "method": "notifications/initialized" }</code></pre>
+
+      <h3>④ tools/list — 工具发现</h3>
+      <pre><code class="language-json">{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/list"
+}</code></pre>
+      <pre><code class="language-json">{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "tools": [{
+      "name": "calculator_add",
+      "title": "Calculator Add",
+      "description": "Add two numbers",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "a": { "type": "integer" }, "b": { "type": "integer" } },
+        "required": ["a", "b"]
+      }
+    }]
+  }
+}</code></pre>
+
+      <h3>⑤ tools/call — 执行工具</h3>
+      <pre><code class="language-json">{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+    "name": "calculator_add",
+    "arguments": { "a": 1, "b": 2 }
+  }
+}</code></pre>
+      <pre><code class="language-json">{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "content": [{ "type": "text", "text": "3" }],
+    "structuredContent": { "result": 3 },
+    "isError": false
+  }
+}</code></pre>
+      <div class="tip">记忆口诀：<strong>先握手 → 再发现 → 再调用 → 再回填</strong>。</div>
+    </section>
+
+    <!-- =================== 4. 通用应用场景 =================== -->
+    <section id="scenarios">
+      <h1>4. 通用应用场景</h1>
+
+      <p>本 demo 是“玩具版”，但 MCP 设计面向的是这些通用场景：</p>
+
+      <h2>4.1 场景一：本地开发 / 演示</h2>
+      <p>客户端直接把服务端当子进程拉起，用 stdio 通信。零部署、最方便调试。适合 IDE 插件、本地 Agent、教学。</p>
+
+      <h2>4.2 场景二：远程 MCP 服务</h2>
+      <p>工具逻辑跑在一个长期运行的进程（sse / streamable_http），多个客户端通过网络共享同一份工具实现。适合团队共用、跨机器、跨账号体系。</p>
+
+      <h2>4.3 场景三：企业内部“工具总线”</h2>
+      <p>把不同业务系统（数据库查询、工单、监控、CRM…）按 MCP 统一暴露成工具，聊天模型只对接 MCP 客户端，就能一站式调用全公司能力。</p>
+
+      <h2>4.4 场景四：Agent 生态集成</h2>
+      <p>第三方 Agent / IDE / 框架只要支持 MCP 客户端，就能“插上”你提供的工具，无需关心你的实现语言与运行环境。</p>
+
+      <h3 id="comparison">4.5 MCP vs Function Calling</h3>
+      <p>很多人以为两者是二选一，其实是<strong>分工</strong>：</p>
+      <ul>
+        <li><strong>Function Calling</strong>：模型 API 内部能力，决定“要不要调、调哪个、传什么参数”。依赖具体厂商。</li>
+        <li><strong>MCP</strong>：模型与工具之间的通信协议层，标准化 <code>tools/list / tools/call</code>，传输可选 stdio/sse/http。</li>
+      </ul>
+      <p>本 demo 的实际配合：<strong>LLM 用 Function Calling 做决策 → 客户端按 MCP 执行工具 → 回填结果</strong>。</p>
+
+      <figure class="figure-wrap" data-figure="mcp_vs_function_calling">
+        <pre class="plantuml" data-source="diagrams/mcp_vs_function_calling.puml"></pre>
+      </figure>
+    </section>
+
+    <!-- =================== 5. 三种传输对比 =================== -->
+    <section id="transports">
+      <h1>5. 三种传输对比</h1>
+
+      <p>MCP 协议本身在三种传输下完全一样，<strong>只有“字节怎么从客户端送到服务端”不同</strong>。</p>
+
+      <table>
+        <thead><tr><th>维度</th><th>stdio</th><th>sse</th><th>streamable_http</th></tr></thead>
+        <tbody>
+          <tr><td>连接方式</td><td>本地进程管道</td><td>HTTP + Server-Sent Events</td><td>HTTP 请求/响应</td></tr>
+          <tr><td>启动复杂度</td><td>最低（单命令）</td><td>中等（服务端+客户端）</td><td>中等（服务端+客户端）</td></tr>
+          <tr><td>典型场景</td><td>本地开发 / 演示</td><td>局域网 / 远程服务</td><td>Web 化部署</td></tr>
+          <tr><td>调试体验</td><td>最直接</td><td>需看网络连通</td><td>需看网络连通</td></tr>
+        </tbody>
+      </table>
+
+      <figure class="figure-wrap" data-figure="transport_comparison">
+        <pre class="plantuml" data-source="diagrams/transport_comparison.puml"></pre>
+      </figure>
+
+      <p><strong>选型建议</strong>：</p>
+      <ul>
+        <li>想最快跑通 → 用 <code>stdio</code>。</li>
+        <li>想模拟“客户端连远程服务” → 用 <code>sse</code> 或 <code>streamable_http</code>。</li>
+        <li>多人部署 / Web 化 → 优先 HTTP 形态（<code>sse</code> / <code>streamable_http</code>）。</li>
+      </ul>
+
+      <h2 id="run">5.1 怎么在本机跑</h2>
+      <h3>① stdio（最简单）</h3>
+      <pre><code class="language-bash">uv sync
+uv run python main.py
+# 输入：帮我算 1+2
+# 输出：助手: 1 + 2 = 3</code></pre>
+      <h3>② sse（双终端）</h3>
+      <pre><code class="language-bash"># .env: MCP_TRANSPORT=sse
+
+# 终端 A（服务端）
+uv run python -m server.sse
+
+# 终端 B（客户端）
+uv run python main.py</code></pre>
+      <h3>③ streamable_http（双终端）</h3>
+      <pre><code class="language-bash"># .env: MCP_TRANSPORT=streamable_http
+
+# 终端 A
+uv run python -m server.streamable_http
+
+# 终端 B
+uv run python main.py</code></pre>
+
+      <div class="warn">PlantUML 图在浏览器里渲染依赖外网访问 <code>plantuml.com</code>；离线环境会退化为显示源码，仍可阅读（图本身可用任意 PlantUML 工具本地渲染，见 <code>docs/*.puml</code>）。</div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+window.addEventListener("DOMContentLoaded", () => {
+  // 1. Code highlight
+  if (window.hljs) {
+    document.querySelectorAll("pre code").forEach((b) => hljs.highlightElement(b));
+  }
+  // 2. PlantUML render
+  if (window.McpSite && window.McpSite.renderPlantUml) {
+    window.McpSite.renderPlantUml();
+  }
+});
+</script>
+</body>
+</html>

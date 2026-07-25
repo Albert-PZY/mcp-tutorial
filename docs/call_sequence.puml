@@ -1,0 +1,55 @@
+@startuml call_sequence
+' 一次“帮我计算 1+2”的完整调用时序，覆盖握手/发现/决策/调用/回填/最终输出
+' 比 mermaid 版多了 protocolVersion、notifications/initialized 等协议细节
+
+skinparam backgroundColor #ffffff
+skinparam shadowing false
+skinparam DefaultFontName "Segoe UI","Microsoft YaHei","Helvetica",sans-serif
+skinparam sequence {
+  ArrowColor #334155
+  ActorBorderColor #94a3b8
+  ActorBackgroundColor #f8fafc
+  ParticipantBorderColor #94a3b8
+  LifeLineBorderColor #cbd5e1
+  ParticipantBackgroundColor #ffffff
+}
+
+title 一次 MCP 工具调用的完整时序  Sequence: 1+2
+
+actor "User 用户" as U
+participant "main.py" as Main
+participant "MCP Client\n(client/*)" as C
+participant "MCP Server\n(server/*)" as S
+participant "LLM\n(qwen-plus)" as L
+
+== Phase 1  建立会话并握手 ==
+U -> Main : 输入 "帮我算 1+2"
+Main -> C : create_mcp_client(config)\nasync with client:
+C -> S : initialize{protocolVersion,clientInfo}
+S --> C : result{protocolVersion,\ncapabilities,serverInfo}
+C -> S : notifications/initialized
+
+== Phase 2  发现工具 ==
+C -> S : tools/list
+S --> C : 4 个工具 (add/subtract/multiply/divide)\n含 name/title/description/inputSchema
+
+== Phase 3  LLM 决策选工具 ==
+C -> L : messages(用户问题) + tools(schema)
+L --> C : tool_calls:\ncalculator_add(a=1,b=2)
+
+== Phase 4  客户端执行工具 ==
+C -> S : tools/call(name=calculator_add,\narguments={a:1,b:2})
+S --> C : CallToolResult\ncontent=[{type:text,text:"3"}]
+
+== Phase 5  回填结果并生成最终答案 ==
+C -> L : 追加 tool 消息(result=3)
+L --> C : "1 + 2 = 3"
+C --> Main : 最终文本
+Main --> U : 打印 "助手: 1 + 2 = 3"
+
+note over C,S #fff7ed
+  四类核心 JSON-RPC 方法:
+  initialize / notifications/initialized
+  tools/list / tools/call
+end note
+@enduml

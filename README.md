@@ -1,20 +1,36 @@
 # MCP Minimal Interactive Demo
 
-[English](./README.md) | [中文](./README_zh-CN.md)
+[中文](./README_zh-CN.md) | English | [🏠 Live Tutorial Site](https://albert-pzy.github.io/mcp-tutorial/)
 
-Start the program and chat directly in terminal.
+A minimal MCP (Model Context Protocol) teaching demo: an LLM automatically picks and calls
+FastMCP calculator tools (`add/subtract/multiply/divide`) through the standard MCP protocol,
+and returns a natural-language answer.
 
-Current structure (client/server split):
+> This repo is deliberately small and readable. For a richer visual walkthrough
+> (auto-rendered PlantUML diagrams + syntax-highlighted code) open the **Live Tutorial Site**.
+
+## What you will learn
+
+- How an MCP client and server talk via `initialize → tools/list → tools/call`.
+- The three transport options: `stdio`, `sse`, `streamable_http`.
+- How Function Calling (LLM decision) and MCP (tool transport) cooperate.
+
+## What this demo is **not**
+
+- Not a production agent. No streaming, no async error retry, no multi-turn memory.
+- Not a tool catalog. It only ships 4 trivially-simple calculator tools on purpose.
+
+## Project structure
 
 ```text
 mcp-tutorial/
-|-- main.py                  # Program entry (interactive client)
-|-- config.py                # Config schema and .env loading
+|-- main.py                  # Entry: interactive chat loop (client)
+|-- config.py                # AppConfig schema + .env loading
 |-- client/
 |   |-- runtime.py           # MCP client transport routing (stdio/sse/streamable_http)
-|   `-- llm.py               # OpenAI init + tool-calling loop
+|   `-- llm.py               # OpenAI init + tool-discovery + LLM tool-calling loop
 `-- server/
-    |-- app.py               # MCP server and tool definitions
+    |-- app.py               # FastMCP server + four @mcp.tool calculators
     |-- runtime.py           # MCP server transport routing
     |-- stdio.py             # stdio server entry
     |-- sse.py               # sse server entry
@@ -29,6 +45,8 @@ uv sync
 
 ## 2. Configure `.env`
 
+Copy `.env.example` to `.env` and set your own key:
+
 ```env
 OPENAI_API_KEY=your_api_key
 OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
@@ -42,33 +60,29 @@ MCP_STREAMABLE_PATH=/mcp
 LLM_MAX_TOOL_ROUNDS=3
 ```
 
+This demo uses Alibaba Cloud Bailian's OpenAI-compatible endpoint by default;
+any OpenAI-compatible provider works.
+
 ## 3. Run
 
-### 3.1 stdio (simplest)
+### 3.1 stdio (simplest, one terminal)
 
 ```bash
 uv run python main.py
 ```
 
-Then type directly:
+Then just chat:
 
 ```text
-You: help me calculate 1+2
-Assistant: 1 + 2 = 3
+你：help me calculate 1 + 2
+助手：1 + 2 = 3
 ```
 
 Type `exit` to quit.
 
 ### 3.2 sse (two terminals)
 
-Update `.env` first:
-
-```env
-MCP_TRANSPORT=sse
-MCP_HOST=127.0.0.1
-MCP_PORT=8000
-MCP_SSE_PATH=/sse
-```
+In `.env` set `MCP_TRANSPORT=sse`.
 
 Terminal A (server):
 
@@ -82,18 +96,9 @@ Terminal B (client):
 uv run python main.py
 ```
 
-Type `exit` in terminal B to quit client, and `Ctrl+C` in terminal A to stop server.
-
 ### 3.3 streamable_http (two terminals)
 
-Update `.env` first:
-
-```env
-MCP_TRANSPORT=streamable_http
-MCP_HOST=127.0.0.1
-MCP_PORT=8000
-MCP_STREAMABLE_PATH=/mcp
-```
+In `.env` set `MCP_TRANSPORT=streamable_http`.
 
 Terminal A (server):
 
@@ -107,73 +112,41 @@ Terminal B (client):
 uv run python main.py
 ```
 
-Type `exit` in terminal B to quit client, and `Ctrl+C` in terminal A to stop server.
+## 4. Three transports at a glance
 
-## 4. MCP Basics for Beginners
+| Aspect | `stdio` | `sse` | `streamable_http` |
+|---|---|---|---|
+| Connection | Local process pipe | HTTP + Server-Sent Events | HTTP request/response |
+| Startup | One command | server + client | server + client |
+| Typical use | Local dev / teaching | LAN / remote service | Web-style deployment |
+| Debug feel | Most direct | Need network reachability | Need network reachability |
 
-### 4.1 What is MCP?
+Quick pick:
+- Fastest path → `stdio`.
+- "Client talks to a remote service" → `sse` or `streamable_http`.
+- Multi-user deployment → HTTP form (`sse` / `streamable_http`).
 
-MCP (Model Context Protocol) is a standard way for models to connect to external tools.
+The protocol is the same MCP in all three cases; only how bytes get from
+client to server changes.
 
-Without MCP, each tool integration often needs custom glue code.  
-With MCP, both sides follow the same protocol, so integration becomes consistent.
+## 5. Diagrams (PlantUML source)
 
-In one line: MCP is a standard interface for models to discover and use tools/resources/prompts.
+Repo-kept PlantUML sources live in `docs/`:
 
-### 4.2 Three transport options in this demo
+- [`docs/architecture.puml`](./docs/architecture.puml) — three-layer architecture
+- [`docs/call_sequence.puml`](./docs/call_sequence.puml) — full call sequence (`1+2`)
+- [`docs/process_flow.puml`](./docs/process_flow.puml) — client process flow
+- [`docs/transport_comparison.puml`](./docs/transport_comparison.puml) — three transports side by side
+- [`docs/mcp_vs_function_calling.puml`](./docs/mcp_vs_function_calling.puml) — MCP vs Function Calling
 
-1. `stdio`  
-Communication through standard input/output, usually local subprocess mode.
+The Live Tutorial Site renders these in-browser; see `site/README.md` if you prefer local preview.
 
-2. `sse`  
-HTTP + Server-Sent Events. Good for long-running remote server mode.
+## 6. Further reading
 
-3. `streamable_http`  
-HTTP-based MCP endpoint, suitable for web-style deployment.
+- [MCP complete call flow (EN)](./docs/mcp_complete_call_flow.md) — step-by-step from discovery to final answer, with real captured JSON-RPC payloads.
 
-The protocol is still MCP in all cases.  
-Only the transport changes.
+## 7. Constraints (see `AGENTS.md`)
 
-### 4.3 MCP vs Function Calling
-
-1. Function Calling  
-A model API feature where the model decides which function to call.
-
-2. MCP  
-A protocol layer that standardizes model-to-tool communication across environments.
-
-In this project, LLM decides tool calls, then actual tool execution happens via MCP client/server.
-
-### 4.4 What is JSON-RPC 2.0 in MCP?
-
-MCP messages are structured with JSON-RPC style request/response:
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": {
-    "name": "calculator_add",
-    "arguments": {"a": 1, "b": 2}
-  }
-}
-```
-
-### 4.5 Core MCP workflow in this demo
-
-1. User enters a request in `main.py`.
-2. Client calls `tools/list` to discover MCP tools.
-3. Client sends tool schemas to LLM.
-4. LLM returns `tool_calls`.
-5. Client executes selected tool via `tools/call`.
-6. Tool result is fed back to LLM.
-7. LLM generates the final natural-language answer.
-
-Workflow diagram:
-
-<img src="./docs/process_flow.png" alt="MCP process flow" width="780" />
-
-## Extra docs
-
-- [MCP complete call flow (EN)](./docs/mcp_complete_call_flow.md)
+- Python deps via `uv` only; no `pip install`.
+- Encrypt secrets: `.env` is git-ignored; `.env.example` uses placeholders only.
+- No real `OPENAI_API_KEY` / token / secret in any committed file.
