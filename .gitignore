@@ -6,3 +6,17 @@ __pycache__/
 !.env.example
 AGENTS.md
 .zcode/
+
+# Playwright probe artifacts (regenerable; do not commit screenshots/dumps)
+scripts/_shots/
+scripts/_probe-report.json
+scripts/_metrics.json
+.playwright-mcp/
+# Ad-hoc local screenshots from browser self-tests (repo root)
+/*-*.png
+/before-*.png
+/after-*.png
+/dark-*.png
+/final-*.png
+# Windows shell crash dump (should never be tracked)
+*.stackdump

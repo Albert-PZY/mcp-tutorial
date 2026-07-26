@@ -30,7 +30,8 @@ endif
 repeat
   :[5] input() 读用户输入;
   if ([6] 输入 = exit ?) then (yes)
-    break 结束程序
+    :结束程序;
+    stop
   else (no)
     :[7] ask_with_llm();
     :[8] mcp_client.list_tools()\n发现工具;
@@ -42,8 +43,9 @@ repeat
       else (no)
         :[14] 输出最终自然语言回答;
       endif
-    repeat while (返回了 tool_calls ?)
+    repeat while (返回了 tool_calls ?) is (继续调工具) not (无更多调用)
+    :[15] 打印助手回答;
   endif
-repeat
+repeat while (还有下一轮?) is (继续输入) not (退出)
 stop
 @enduml

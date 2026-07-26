@@ -1,6 +1,14 @@
 /* ===== mcp-tutorial site — Claude-style theme =====
  * Light + Dark modes via [data-theme="dark|light"] on <html>.
  * Default respects prefers-color-scheme, in-page toggle overrides it.
+ *
+ * Visual rules the layout follows:
+ *   - Reading is the priority. Lines stay a comfortable width; spacing does
+ *     the grouping; borders/surfaces stay subtle so content leads.
+ *   - Light mode is warm cream (Claude-ish), low contrast surface; dark mode
+ *     is warm near-black with desaturated accent — both easy on long sessions.
+ *   - The theme toggle floats top-right of the viewport, never inside the
+ *     scrolling sidebar.
  */
 
 :root,
@@ -10,7 +18,7 @@
   --bg-elev: #ffffff;
   --bg-soft: #f3f1ec;
   --bg-code: #f6f5f1;
-  --border: #e9e6dc;
+  --border: #ece8df;
   --border-strong: #d9d4c5;
   --text: #2b2a27;
   --text-soft: #514f4a;
@@ -19,8 +27,10 @@
   --accent-hover: #a84a2c;
   --accent-soft: #fbeee6;
   --h1-underline: #d96846;
-  --maxw: 880px;
-  --sidebar-w: 256px;
+  /* Reading column + slightly wider figure column so PlantUML stays legible. */
+  --maxw: 820px;
+  --maxw-figure: 980px;
+  --sidebar-w: 252px;
   --font-sans: "Charter", "Iowan Old Style", "Apple Garamond", "Source Serif Pro",
                "Noto Serif", "Cormorant", "Times New Roman", Georgia,
                "PingFang SC", "Microsoft YaHei", serif;
@@ -28,23 +38,56 @@
                "Courier New", monospace;
   --radius: 10px;
   --shadow: 0 1px 0 rgba(0,0,0,.03);
+  --topbar-bg: rgba(250, 249, 245, .72);
+  --diagram-bg: #ffffff;
+  --diagram-filter: none;
+  --content-pad-x: 40px;
+  /* Syntax tokens — light theme (readable on cream code bg) */
+  --hl-fg: #3a3834;
+  --hl-comment: #8a8678;
+  --hl-keyword: #a84a2c;
+  --hl-string: #3d7a4a;
+  --hl-number: #b07a12;
+  --hl-title: #c15f3c;
+  --hl-meta: #6b675c;
+  --hl-built: #2f6f7a;
+  --hl-params: #5c564c;
 }
 
 :root[data-theme="dark"] {
-  --bg: #0e0c0a;
-  --bg-elev: #1a1816;
-  --bg-soft: #181614;
-  --bg-code: #161412;
+  /*
+   * Balanced dark: soft enough for night, bright enough for daytime rooms.
+   * Target sits between the old near-white #ece9e2 (glare) and the
+   * over-dimmed #b5b0a6 pass (hard to read in daylight).
+   */
+  --bg: #12100e;
+  --bg-elev: #1c1a16;
+  --bg-soft: #17150f;
+  --bg-code: #17150f;
   --border: #2e2a24;
-  --border-strong: #423b30;
-  --text: #ece9e2;
-  --text-soft: #c8c4bc;
-  --text-muted: #8a847a;
-  --accent: #e2a685;
-  --accent-hover: #efbc9b;
+  --border-strong: #423b32;
+  --text: #d4cfc4;          /* ~mid: readable by day, not a flashlight at night */
+  --text-soft: #a9a399;
+  --text-muted: #807a70;
+  --accent: #d4a07e;
+  --accent-hover: #e2b696;
   --accent-soft: #2a1d15;
-  --h1-underline: #c15f3c;
+  --h1-underline: #b87355;
   --shadow: 0 1px 0 rgba(0,0,0,.4);
+  --topbar-bg: rgba(18, 16, 14, .78);
+  /* Warm board + mild dim — cut glare without greying the diagram out. */
+  --diagram-bg: #ebe6dc;
+  --diagram-filter: brightness(0.90) contrast(0.96) saturate(0.94);
+  /* Syntax tokens — muted but still distinct in daylight */
+  --hl-fg: #cdc7bc;
+  --hl-comment: #807a70;
+  --hl-keyword: #d4a098;
+  --hl-string: #a3c08a;
+  --hl-number: #d4b06a;
+  --hl-title: #d4a07e;
+  --hl-meta: #a09a90;
+  --hl-built: #8fbf9a;
+  --hl-params: #c0ae92;
 }
 
 * { box-sizing: border-box; }
@@ -54,13 +97,20 @@ body {
   font-family: var(--font-sans);
   color: var(--text);
   background: var(--bg);
-  line-height: 1.7;
+  line-height: 1.75;            /* generous vertical rhythm for long reads */
   font-size: 16.5px;
+  font-feature-settings: "kern" 1, "liga" 1;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 a { color: var(--accent); text-decoration: none; }
 a:hover { color: var(--accent-hover); text-decoration: underline; }
+
+/* So smoothness doesn't break user motion preferences. */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
 
 /* ===== Layout ===== */
 .layout { display: flex; min-height: 100vh; }
@@ -73,11 +123,11 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   overflow-y: auto;
   border-right: 1px solid var(--border);
   background: var(--bg-soft);
-  padding: 22px 18px;
+  padding: 28px 18px 24px;
   flex-shrink: 0;
 }
 .brand {
-  font-size: 1.05rem;
+  font-size: 1.02rem;
   font-weight: 600;
   margin: 0 0 2px;
   letter-spacing: .3px;
@@ -85,60 +135,117 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 .brand-sub {
   font-size: .78rem;
   color: var(--text-muted);
-  margin: 0 0 18px;
+  margin: 0 0 20px;
 }
+.sidebar nav { display: flex; flex-direction: column; gap: 1px; }
 .sidebar nav a {
   display: block;
-  padding: 6px 10px;
+  padding: 6px 11px;
   border-radius: 7px;
   color: var(--text-soft);
-  font-size: .92rem;
+  font-size: .9rem;
   font-family: var(--font-mono);
   letter-spacing: -.1px;
+  border-left: 2px solid transparent;
 }
 .sidebar nav a:hover { background: var(--accent-soft); color: var(--accent); text-decoration: none; }
-.sidebar nav a.sub { padding-left: 22px; font-size: .82rem; }
+.sidebar nav a.sub { padding-left: 22px; font-size: .8rem; color: var(--text-muted); }
+.sidebar nav a.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-left-color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
 
-.theme-toggle {
-  margin-top: 22px;
+/* scrollbar in sidebar kept thin and not flashy */
+.sidebar::-webkit-scrollbar { width: 8px; }
+.sidebar::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; }
+
+/* ===== Floating top-right controls (theme + back-to-top) =====
+ * Lives outside <aside> so it is independent of sidebar scroll, and stays
+ * fixed at the viewport corner — a common pattern in docs sites (e.g.
+ * Notion / Linear help center / Vanilla docs).
+ */
+.topbar {
+  position: fixed;
+  top: 14px;
+  right: 18px;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 5px 5px 6px;
+  background: var(--topbar-bg);
+  -webkit-backdrop-filter: saturate(180%) blur(8px);
+  backdrop-filter: saturate(180%) blur(8px);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 2px 12px rgba(0,0,0,.06);
+}
+.theme-toggle, .topbar-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
+  gap: 7px;
+  padding: 7px 11px;
   border: 1px solid var(--border-strong);
   background: var(--bg-elev);
   color: var(--text-soft);
   border-radius: 999px;
   cursor: pointer;
-  font-size: .8rem;
-  transition: background .15s ease, color .15s;
+  font-size: .81rem;
+  font-family: var(--font-mono);
+  line-height: 1;
+  transition: background .15s ease, color .15s, border-color .15s;
 }
-.theme-toggle:hover { background: var(--accent-soft); color: var(--accent); }
+.theme-toggle { padding: 7px 12px; }
+.theme-toggle:hover, .topbar-btn:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.theme-toggle-icon { font-size: .92rem; line-height: 1; }
+.theme-toggle-label { letter-spacing: .2px; }
+.topbar-btn { padding: 7px; width: 30px; height: 30px; justify-content: center; }
+.topbar-btn[hidden] { display: none !important; }
 
-.content { flex: 1; min-width: 0; padding: 36px 28px 80px; }
-.content > section { max-width: var(--maxw); margin: 0 auto 56px; scroll-margin-top: 20px; }
+/* ===== Main content =====
+ * Hero + sections share the same reading column so edges align.
+ * Figures may grow a bit wider than prose for diagram readability.
+ */
+.content { flex: 1; min-width: 0; padding: 48px var(--content-pad-x) 100px; }
+.content > .hero,
+.content > section {
+  max-width: var(--maxw);
+  margin-left: auto;
+  margin-right: auto;
+}
+.content > section { margin-bottom: 72px; scroll-margin-top: 24px; }
 .content h1 {
-  font-size: 1.85rem;
+  font-size: 1.95rem;
   font-weight: 650;
   border-bottom: 2px solid var(--h1-underline);
   padding-bottom: 10px;
-  margin: 0 0 22px;
-  letter-spacing: -.2px;
+  margin: 0 0 24px;
+  letter-spacing: -.3px;
 }
 .content h2 {
-  font-size: 1.34rem;
+  font-size: 1.32rem;
   font-weight: 600;
-  margin: 32px 0 12px;
+  margin: 40px 0 14px;
   color: var(--text);
+  letter-spacing: -.1px;
 }
 .content h3 {
-  font-size: 1.08rem;
+  font-size: 1.06rem;
   font-weight: 600;
-  margin: 20px 0 8px;
+  margin: 26px 0 10px;
   color: var(--accent);
 }
-.content p, .content li { font-size: .98rem; }
-.content ul, .content ol { padding-left: 1.4em; }
+.content p, .content li { font-size: .99rem; }
+.content p { margin: 14px 0; }
+.content ul, .content ol { padding-left: 1.4em; margin: 12px 0; }
+.content li { margin: 4px 0; }
 .content code:not(pre code) {
   background: var(--bg-code);
   border: 1px solid var(--border);
@@ -148,88 +255,152 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   font-size: .85em;
   color: var(--text);
 }
-.content table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: .9rem; }
-.content th, .content td { border: 1px solid var(--border); padding: 8px 11px; text-align: left; }
-.content th { background: var(--bg-soft); font-weight: 600; }
+/* Tables — calmer borders (hairline, only between rows) */
+.content table { border-collapse: collapse; width: 100%; margin: 18px 0; font-size: .93rem; }
+.content th, .content td { border-bottom: 1px solid var(--border); padding: 10px 12px; text-align: left; }
+.content thead th { border-bottom: 2px solid var(--border-strong); font-weight: 600; background: transparent; }
+.content tbody tr:last-child td { border-bottom: 0; }
+.content tbody tr:nth-child(even) td { background: var(--bg-soft); }
 blockquote {
   border-left: 4px solid var(--accent);
   background: var(--accent-soft);
-  margin: 14px 0;
-  padding: 10px 14px;
+  margin: 18px 0;
+  padding: 12px 16px;
   color: var(--text);
-  border-radius: 0 7px 7px 0;
+  border-radius: 0 8px 8px 0;
 }
 
-/* ===== Code blocks (highlight.js) ===== */
+/* ===== Code blocks (highlight.js) =====
+ * Theme tokens live on :root so light / dark both get proper contrast.
+ * CDN github-dark CSS is loaded as a base, but our rules win (same specificity
+ * + later in cascade) so tokens stay on-brand either way.
+ */
 pre {
   background: var(--bg-code);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 12px 14px;
+  padding: 14px 16px;
   overflow-x: auto;
   font-family: var(--font-mono);
-  font-size: .86rem;
-  line-height: 1.55;
-  margin: 14px 0;
+  font-size: .85rem;
+  line-height: 1.65;
+  margin: 16px 0;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.02);
 }
-pre code { background: transparent; padding: 0; border: 0; font-family: inherit; color: var(--text); }
+pre code,
+pre code.hljs,
+.hljs {
+  background: transparent !important;
+  padding: 0;
+  border: 0;
+  font-family: inherit;
+  color: var(--hl-fg);
+  display: block;
+  overflow-x: visible;
+}
+.hljs-comment, .hljs-quote { color: var(--hl-comment); font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-deletion, .hljs-literal { color: var(--hl-keyword); }
+.hljs-string, .hljs-attr, .hljs-addition, .hljs-template-tag, .hljs-template-variable { color: var(--hl-string); }
+.hljs-number { color: var(--hl-number); }
+.hljs-title, .hljs-title.function_, .hljs-title.class_, .hljs-section { color: var(--hl-title); }
+.hljs-meta, .hljs-meta .hljs-keyword, .hljs-property, .hljs-attribute { color: var(--hl-meta); }
+.hljs-built_in, .hljs-class .hljs-title, .hljs-type, .hljs-name, .hljs-selector-id, .hljs-selector-class { color: var(--hl-built); }
+.hljs-params, .hljs-variable, .hljs-symbol { color: var(--hl-params); }
+.hljs-punctuation, .hljs-operator { color: var(--hl-meta); }
+.hljs-subst { color: var(--hl-fg); }
+/* Inline code stays neutral (not syntax-colored). */
+code:not(pre code) { color: var(--text); }
 
-/*
- * Syntax highlighting colors — overridden for both light and dark.
- * We import the official github-dark.min.css in index.html, but we also
- * expose our own palette below so the look stays consistent even if the
- * CDN CSS loads only after the user toggles theme or fails to load.
+/* ===== PlantUML figures =====
+ * Teaching diagrams must be fully visible — no hard max-height crop.
+ * Wide sequence/component SVGs keep horizontal scroll; tall activity
+ * diagrams grow with the page instead of nesting a second scrollbar.
  */
-:root[data-theme="dark"] pre code.hljs,
-:root[data-theme="dark"] .hljs {
-  color: #e6e1d6;
-  background: transparent;
-}
-.hljs-comment, .hljs-quote { color: #7c7868; font-style: italic; }
-.hljs-keyword, .hljs-selector-tag, .hljs-deletion { color: #d1938e; }
-.hljs-string, .hljs-attr, .hljs-addition { color: #b9c98a; }
-.hljs-number, .hljs-literal { color: #d8a23a; }
-.hljs-title, .hljs-title.function_, .hljs-section { color: #e2a685; }
-.hljs-meta, .hljs-property { color: #c8c4bc; }
-.hljs-built_in, .hljs-class .hljs-title, .hljs-type { color: #9bd4a0; }
-.hljs-params { color: #cdb99b; }
-
-/* ===== PlantUML figures ===== */
 figure.figure-wrap {
-  margin: 18px 0;
+  margin: 28px auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-elev);
-  padding: 14px;
-  overflow: auto;
-  max-height: 480px;
+  padding: 18px 18px 12px;
+  overflow-x: auto;
+  overflow-y: visible;
+  max-height: none;
   box-shadow: var(--shadow);
+  width: 100%;
+  max-width: min(var(--maxw-figure), 100%);
+  min-height: 120px;
+  position: relative;
 }
-figure.figure-wrap::after {
+/* Let figures breathe wider than the prose column when viewport allows. */
+@media (min-width: 1180px) {
+  .content > section {
+    /* Section container stays prose-width; figure breaks out symmetrically. */
+    overflow: visible;
+  }
+  figure.figure-wrap {
+    width: min(var(--maxw-figure), calc(100vw - var(--sidebar-w) - 2 * var(--content-pad-x)));
+    max-width: none;
+    position: relative;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+}
+figure.figure-wrap.figure-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  color: var(--text-muted);
+  font-size: .88rem;
+  font-family: var(--font-mono);
+}
+figure.figure-wrap.figure-loading::before {
+  content: "";
+  width: 28px;
+  height: 28px;
+  margin-bottom: 12px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: figure-spin .7s linear infinite;
+}
+@keyframes figure-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  figure.figure-wrap.figure-loading::before { animation: none; border-top-color: var(--border-strong); }
+}
+figure.figure-wrap.figure-ready::after {
   content: "🔍 点击图片可无损放大（拖拽平移 / 滚轮缩放 / Esc 关闭）";
   display: block;
   text-align: center;
   font-size: .76rem;
   color: var(--text-muted);
-  margin-top: 8px;
+  margin-top: 12px;
 }
 figure.figure-wrap.figure-ready svg {
   display: block;
   max-width: 100%;
+  width: auto;
   height: auto;
   margin: 0 auto;
-  background: #fff;  /* keep diagrams on white for clarity in dark mode too */
+  background: var(--diagram-bg);
   border-radius: 6px;
+  /* Dark mode dims the white PlantUML board so it doesn't glare. */
+  filter: var(--diagram-filter);
 }
 figure.figure-wrap.figure-error {
   border-color: var(--accent);
   background: var(--accent-soft);
+  transform: none;
+  left: auto;
+  width: 100%;
+  max-width: 100%;
 }
 figcaption {
   text-align: center;
   font-size: .78rem;
   color: var(--text-muted);
-  margin-top: 6px;
+  margin-top: 8px;
 }
 /* Visible source shown when plantuml.com is unreachable */
 .figure-source summary { cursor: pointer; color: var(--accent); font-size: .9rem; }
@@ -242,6 +413,7 @@ figcaption {
   font-size: .82rem;
   white-space: pre-wrap;
   word-break: break-word;
+  margin-top: 8px;
 }
 .figure-error-hint {
   color: var(--text-soft);
@@ -250,41 +422,128 @@ figcaption {
 }
 pre.plantuml { display: none; }  /* hidden source container */
 
-/* ===== Zoom overlay ===== */
+/* ===== Image lightbox (zoom overlay) =====
+ * Header (left title + right close), large stage, bottom-right floating
+ * toolbar with icon buttons + zoom %. Designed after Viewer.js / medium-zoom.
+ */
+body.zoom-lock { overflow: hidden; }
+/* While panning, freeze selection globally so drag-over SVG text can't flash. */
+body.zoom-dragging,
+body.zoom-dragging * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  cursor: grabbing !important;
+}
+
 .zoom-overlay {
   position: fixed; inset: 0; z-index: 1000;
-  background: rgba(15, 12, 8, .9);
-  display: flex; flex-direction: column; align-items: center;
-  padding: 14px;
+  background: rgba(20, 16, 12, .86);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  display: flex; flex-direction: column;
+  animation: zoom-fade-in .15s ease-out;
 }
-.zoom-close {
-  align-self: flex-end;
-  background: var(--bg-elev); color: var(--text);
-  border: 1px solid var(--border-strong);
-  border-radius: 6px;
-  padding: 6px 12px; cursor: pointer;
-  font-size: .88rem;
+@keyframes zoom-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+.zoom-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px;
+  color: #f4efe6;
 }
-.zoom-close:hover { background: var(--accent-soft); }
-.zoom-controls { display: flex; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
-.zoom-controls button {
-  background: var(--bg-elev); color: var(--text);
-  border: 1px solid var(--border-strong);
-  border-radius: 6px;
-  padding: 6px 12px; cursor: pointer; font-size: .88rem;
+.zoom-title {
+  font-size: .86rem;
+  font-family: var(--font-mono);
+  color: rgba(244, 239, 230, .86);
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.zoom-controls button:hover { background: var(--accent-soft); }
 .zoom-stage {
-  flex: 1; min-height: 0; width: 100%;
-  overflow: auto;
-  background: #fff;
-  border-radius: 8px;
+  flex: 1; min-height: 0;
+  position: relative;
+  overflow: hidden;
   cursor: grab;
-  display: flex; align-items: flex-start; justify-content: center;
-  padding: 12px;
+  display: flex; align-items: center; justify-content: center;
+  padding: 8px 24px 40px;
+  /* Prevent accidental text selection while panning SVG labels. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+  touch-action: none;
 }
-.zoom-stage svg { max-width: none; width: auto; height: auto; transform-origin: center; }
-.zoom-stage:active { cursor: grabbing; }
+.zoom-stage.dragging { cursor: grabbing; }
+.zoom-stage-inner {
+  display: block;
+  will-change: transform;
+  transform-origin: center center;
+  transition: transform .05s linear;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.zoom-stage svg {
+  max-width: none;
+  width: 78vmin;
+  height: auto;
+  background: var(--diagram-bg);
+  border-radius: 4px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.4);
+  filter: var(--diagram-filter);
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: auto;
+}
+/* SVG <text> nodes are selectable by default; kill that during pan. */
+.zoom-stage svg,
+.zoom-stage svg * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+.zoom-stage svg text,
+.zoom-stage svg tspan {
+  pointer-events: none;
+}
+
+.zoom-toolbar {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  background: rgba(28, 26, 23, .82);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 12px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .35);
+}
+.zoom-iconbtn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px;
+  padding: 0;
+  background: transparent;
+  color: #efeae0;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background .12s ease, color .12s;
+}
+.zoom-iconbtn:hover { background: rgba(255, 255, 255, .12); color: #fff; }
+.zoom-iconbtn.zoom-close {
+  width: 34px; height: 34px;
+  background: rgba(255, 255, 255, .05);
+}
+.zoom-iconbtn.zoom-close:hover { background: rgba(193, 95, 60, .85); color: #fff; }
+.zoom-label {
+  min-width: 48px;
+  text-align: center;
+  font-size: .76rem;
+  font-family: var(--font-mono);
+  color: rgba(239, 234, 224, .86);
+  padding: 0 6px;
+}
 
 /* ===== Hero banner ===== */
 .hero {
@@ -292,18 +551,18 @@ pre.plantuml { display: none; }  /* hidden source container */
   border: 1px solid var(--border);
   border-left: 4px solid var(--accent);
   border-radius: var(--radius);
-  padding: 26px 28px;
-  margin-bottom: 30px;
+  padding: 28px 30px;
+  margin-bottom: 40px;
 }
-.hero h1 { border-bottom: 0; margin: 0 0 8px; font-size: 2.05rem; letter-spacing: -.5px; }
-.hero p { color: var(--text-soft); margin: 6px 0; font-size: 1rem; }
-.hero .badges { margin-top: 14px; display: flex; gap: 8px; flex-wrap: wrap; }
+.hero h1 { border-bottom: 0; margin: 0 0 10px; font-size: 2.05rem; letter-spacing: -.5px; }
+.hero p { color: var(--text-soft); margin: 6px 0; font-size: 1.02rem; line-height: 1.7; }
+.hero .badges { margin-top: 18px; display: flex; gap: 8px; flex-wrap: wrap; }
 .hero .badges span {
   font-size: .78rem;
   background: var(--bg-elev);
   border: 1px solid var(--border);
   color: var(--text-soft);
-  padding: 3px 11px;
+  padding: 4px 12px;
   border-radius: 999px;
   font-family: var(--font-mono);
 }
@@ -312,17 +571,17 @@ pre.plantuml { display: none; }  /* hidden source container */
 .three-role {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  margin: 18px 0;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  margin: 22px 0;
 }
 .three-role .role-card {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 14px;
+  padding: 14px 16px;
   background: var(--bg-elev);
 }
-.three-role .role-card h4 { margin: 0 0 4px; font-size: 1rem; font-weight: 600; }
-.three-role .role-card p { margin: 0; font-size: .88rem; color: var(--text-soft); }
+.three-role .role-card h4 { margin: 0 0 6px; font-size: 1rem; font-weight: 600; }
+.three-role .role-card p { margin: 0; font-size: .88rem; color: var(--text-soft); line-height: 1.65; }
 .three-role .role-think { border-left: 4px solid #8b5cf6; }
 .three-role .role-carry { border-left: 4px solid #06b6d4; }
 .three-role .role-do    { border-left: 4px solid var(--accent); }
@@ -330,20 +589,20 @@ pre.plantuml { display: none; }  /* hidden source container */
 .tip {
   border-left: 4px solid #4f9c69;
   background: var(--accent-soft);
-  border-radius: 0 7px 7px 0;
-  padding: 10px 14px;
-  margin: 14px 0;
+  border-radius: 0 8px 8px 0;
+  padding: 12px 16px;
+  margin: 18px 0;
   color: var(--text);
-  font-size: .94rem;
+  font-size: .95rem;
 }
 .warn {
   border-left: 4px solid #d8a23a;
   background: var(--bg-soft);
-  border-radius: 0 7px 7px 0;
-  padding: 10px 14px;
-  margin: 14px 0;
+  border-radius: 0 8px 8px 0;
+  padding: 12px 16px;
+  margin: 18px 0;
   color: var(--text);
-  font-size: .94rem;
+  font-size: .95rem;
 }
 
 /* ===== Mobile ===== */
@@ -352,6 +611,28 @@ pre.plantuml { display: none; }  /* hidden source container */
   .sidebar {
     position: static; width: 100%; height: auto;
     border-right: 0; border-bottom: 1px solid var(--border);
+    padding: 18px 16px;
   }
-  .content { padding: 24px 16px 60px; }
+  .sidebar nav {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 2px 6px;
+  }
+  .sidebar nav a.sub { padding-left: 12px; }
+  .content { padding: 28px 16px 72px; --content-pad-x: 16px; }
+  .content > .hero,
+  .content > section { max-width: 100%; }
+  figure.figure-wrap {
+    left: auto;
+    transform: none;
+    width: 100%;
+    max-width: 100%;
+    padding: 12px;
+    margin: 20px 0;
+  }
+  /* On small screens the floating bar can overlap the title; nudge it down. */
+  .topbar { top: auto; bottom: 18px; right: 18px; }
+  .zoom-stage svg { width: 95vmin; }
+  .hero { padding: 20px 18px; }
+  .hero h1 { font-size: 1.65rem; }
 }

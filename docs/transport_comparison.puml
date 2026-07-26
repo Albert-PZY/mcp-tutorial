@@ -1,43 +1,58 @@
 @startuml transport_comparison
-' 三种传输方式的连接结构对比（并列三泳道）
+' 三种传输方式的连接结构对比（并列三栏）
 ' 只画“怎么连”，不画协议方法 —— 协议方法三种一致，不重复
+'
+' 说明：旧版本用 |stdio| 这类 swimlane 语法 + component 节点，
+' 但 swimlane 只支持活动图，component 在新语法中被认为是合成错误，
+' 这里改用 "together { package }" 三栏水平并列，视觉等价但语法合法。
 
 skinparam backgroundColor #ffffff
 skinparam shadowing false
 skinparam roundCorner 8
 skinparam DefaultFontName "Segoe UI","Microsoft YaHei","Helvetica",sans-serif
 skinparam ArrowColor #475569
+skinparam component {
+  BackgroundColor #f8fafc
+  BorderColor #94a3b8
+  FontColor #0f172a
+}
+skinparam cloud {
+  BackgroundColor #f0f9ff
+  BorderColor #38bdf8
+}
 
 title 三种传输：连接方式对比  TransportComparison
 
-skinparam swimlane {
-  BorderColor #cbd5e1
-  TitleFontColor #0f172a
+together {
+  package "stdio" as PStdio #eef2ff {
+    component "main.py + MCP Client" as StC #e0f2fe
+    component "server/stdio.py\n(子进程)" as StS #bae6fd
+    StC -> StS : 标准输入 (stdin)
+    StS -> StC : 标准输出 (stdout)
+    note bottom of StS : 单进程命令即跑\nuv run python main.py
+  }
+
+  package "sse  (HTTP+SSE)" as PSse #ecfeff {
+    component "MCP Server\nserver.sse (长驻)" as SeS #cffafe
+    component "main.py + MCP Client\n(连 /sse)" as SeC #a5f3fc
+    cloud "HTTP 通道\nServer-Sent Events" as SeN #e0f7fa
+    SeC --> SeN : HTTP 长连接
+    SeN --> SeS : 单向事件流
+    SeC <-- SeS : SSE 推送 / JSON-RPC 应答
+    note bottom of SeS : 终端 A 跑 server, 终端 B 跑 client\n适合远程/局域网
+  }
+
+  package "streamable_http" as PHttp #f3e8ff {
+    component "MCP Server\nserver.streamable_http (长驻)" as HtS #e9d5ff
+    component "main.py + MCP Client\n(连 /mcp)" as HtC #d8b4fe
+    HtC <-> HtS : HTTP 请求/响应\n(streamable)
+    note bottom of HtS : 标准 HTTP 端点\n最适合 Web 化/多客户端部署
+  }
 }
 
-|stdio|
-skinparam component {BackgroundColor #e0f2fe BorderColor #0284c7}
-component "main.py + MCP Client" as StC #e0f2fe
-component "server/stdio.py\n(子进程)" as StS #bae6fd
-StC -> StS : 标准输入 (stdin)
-StS -> StC : 标准输出 (stdout)
-note bottom of StS : 单进程命令即跑\nuv run python main.py
-
-|sse (HTTP+SSE)|
-skinparam component {BackgroundColor #ecfeff BorderColor #0e7490}
-component "MCP Server\nserver.sse (长驻)" as SeS #cffafe
-component "main.py + MCP Client\n(连 /sse)" as SeC #a5f3fc
-cloud "HTTP 通道\nServer-Sent Events" as SeN #e0f7fa
-SeC --> SeN : HTTP 长连接
-SeN --> SeS : 单向事件流
-SeC <-- SeS : SSE 推送 / JSON-RPC 应答
-note bottom of SeS : 终端 A 跑 server, 终端 B 跑 client\n适合远程/局域网
-
-|streamable_http|
-skinparam component {BackgroundColor #f3e8ff BorderColor #7e22ce}
-component "MCP Server\nserver.streamable_http (长驻)" as HtS #e9d5ff
-component "main.py + MCP Client\n(连 /mcp)" as HtC #d8b4fe
-HtC <-> HtS : HTTP 请求/响应\n(streamable)
-note bottom of HtS : 标准 HTTP 端点\n最适合 Web 化/多客户端部署
+' 顶部小结：三种传输共用同一份 MCP 协议，差别只在传输通道
+note top of PStdio : 启动复杂度 最低
+note top of PSse   : 启动复杂度 中等
+note top of PHttp  : 启动复杂度 中等
 
 @enduml
